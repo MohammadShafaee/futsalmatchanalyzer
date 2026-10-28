@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "futsal-video-analyzer"
+version = "0.1.0"
+description = "YOLO tracking and team analytics for futsal video"
+requires-python = ">=3.11"
+dependencies = ["ultralytics>=8.3", "opencv-python>=4.9", "numpy>=1.26"]
+
+[project.scripts]
+futsal-analyze = "match_analyzer:main"
+
+[tool.setuptools]
+py-modules = ["match_analyzer"]
+package-dir = {"" = "src"}

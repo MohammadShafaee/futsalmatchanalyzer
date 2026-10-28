@@ -1,0 +1,10 @@
+{
+  "version": "0.2.0",
+  "configurations": [{
+    "name": "Analyze Manzano-Jesolo (preview)",
+    "type": "debugpy", "request": "launch",
+    "program": "${workspaceFolder}/src/match_analyzer.py",
+    "console": "integratedTerminal",
+    "args": ["D:/Football Match Analyzer/Manzano-Jesolo.App.mp4", "--stride", "5", "--imgsz", "960"]
+  }]
+}
