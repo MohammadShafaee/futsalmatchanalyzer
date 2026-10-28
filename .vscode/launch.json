@@ -1,10 +1,20 @@
 {
   "version": "0.2.0",
-  "configurations": [{
-    "name": "Analyze Manzano-Jesolo (preview)",
-    "type": "debugpy", "request": "launch",
-    "program": "${workspaceFolder}/src/match_analyzer.py",
-    "console": "integratedTerminal",
-    "args": ["D:/Football Match Analyzer/Manzano-Jesolo.App.mp4", "--stride", "5", "--imgsz", "960"]
-  }]
+  "configurations": [
+    {
+      "name": "Run: short clip",
+      "type": "debugpy", "request": "launch", "module": "futsal",
+      "cwd": "${workspaceFolder}", "console": "integratedTerminal",
+      "args": ["run", "configs/manzano_clip.yaml"]
+    },
+    {
+      "name": "Re-analyze last run (no YOLO)",
+      "type": "debugpy", "request": "launch", "module": "futsal",
+      "cwd": "${workspaceFolder}", "console": "integratedTerminal",
+      "args": ["analyze", "configs/manzano_clip.yaml", "${input:runDir}", "--render"]
+    }
+  ],
+  "inputs": [
+    {"id": "runDir", "type": "promptString", "description": "Run directory, e.g. outputs/IMG_8267_20261029_000816"}
+  ]
 }

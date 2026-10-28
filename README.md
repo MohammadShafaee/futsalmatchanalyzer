@@ -1,34 +1,61 @@
-# Futsal Video Analyzer
+# Futsal Match Analyzer
 
-Python + YOLO starter project for the fixed wide-angle indoor Manzano–Jesolo recording. It detects people and the ball, tracks detections, groups shirts into two color clusters, and exports time-coded rows.
+Analyzes fixed-camera futsal video: YOLO finds people and the ball, ByteTrack follows players,
+shirt colours identify teams / goalkeepers / referees, and possession is estimated from the ball position.
 
-## Setup in VS Code (Windows)
+## Setup (Windows, VS Code)
 
 ```powershell
 py -3.11 -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -e ".[dev]"
 ```
 
-First run downloads `yolo11n.pt`. A GPU works when the PyTorch installation supports it; CPU is used otherwise.
+Model weights go in `models/` (e.g. `models/yolo11m.pt`; Ultralytics downloads known names automatically).
+Videos go in `input/`. Neither is committed to git.
 
-## Run
+## Usage
 
-The project points at the existing match file:
+Every match/camera has a YAML config in `configs/` (video path, team names, kit colours,
+court polygon, detector settings). See `configs/manzano_clip.yaml`.
 
 ```powershell
-python src\match_analyzer.py --stride 5 --imgsz 960 --team1-name Manzano --team2-name Jesolo
+python -m futsal run configs\manzano_clip.yaml              # detect + analyze + render
+python -m futsal analyze configs\manzano_clip.yaml outputs\<run> --render   # re-analyze, no YOLO
+python -m futsal render outputs\<run>                         # redraw the video only
+python -m pytest                                               # unit tests
 ```
 
-For a more detailed, slower pass, use `--stride 2 --imgsz 1280 --verbose`. Set a custom detector with `--model path\to\weights.pt`; model class names should include `person`/`player` and `sports ball`/`ball`. `--device 0` selects a supported GPU. `--no-render` skips annotated video.
+`detect` is the slow step (YOLO on every `stride`-th frame). `analyze` reuses `raw_detections.csv`,
+so kit colours, the court polygon and possession settings can be tuned in seconds.
 
-Each run writes `outputs/<video>_<time>/annotated.mp4`, `detections.csv`, and `summary.json`. Detection rows include timestamps, object types, IDs, confidence, bounds, center position, and inferred team. Summary statistics are rough: possession is nearest-player distance, shirt clustering may need manual remapping, and player movement is in pixels. Court calibration is needed before reporting meters. This starter does not yet classify passes, shots, goals, fouls, or tactics. Review the annotated video before using the estimates.
+Each run directory contains:
 
-## Method and references
+| File | Content |
+|---|---|
+| `raw_detections.csv` | every YOLO box (people with ByteTrack IDs, ball candidates) |
+| `detections.csv` | on-court people with stitched track IDs, kit, team, role |
+| `frames.csv` | per analyzed frame: chosen ball position (detected/interpolated), player in control, team in possession |
+| `summary.json` | video metadata, config used, team possession, per-player stats, quality indicators |
+| `annotated.mp4` | boxes coloured by kit, ball circle, possession counter |
 
-The workflow follows the stages in the tutorial you linked: YOLO detection, ByteTrack tracking, jersey-color grouping, and movement analysis. This first version uses a general COCO model; a sports-trained detector should perform better on the small ball.
+## Pipeline
 
-- [Your linked tutorial](https://youtu.be/neBZ6huolkg)
-- [Tutorial code repository](https://github.com/abdullahtarek/football_analysis)
-- [Ultralytics tracking mode](https://docs.ultralytics.com/modes/track/)
+```
+video ─► crop black bars ─► YOLO (people + ball) ─► ByteTrack (people) ─► raw_detections.csv
+                                                                                 │
+   court polygon filter ◄────────────────────────────────────────────────────────┘
+   ─► kit votes per torso pixel, summed per track ─► stitch fragmented tracks ─► drop short tracks
+   ─► ball trajectory (plausibility filter + gap interpolation) ─► possession (with hysteresis)
+   ─► CSV / JSON ─► render
+```
+
+Code lives in `src/futsal/`: `config`, `video`, `detect`, `court`, `kits`, `tracks`, `ball`,
+`metrics`, `storage`, `render`, `pipeline`, `cli`.
+
+## Known limitations
+
+- The ball is ~10 px wide in a panoramic view; a general COCO model misses it often. A futsal-trained detector would help most.
+- Possession is proximity-based, not verified contact. Distances are in pixels (no court calibration yet).
+- Passes, shots, goals and fouls are not classified.

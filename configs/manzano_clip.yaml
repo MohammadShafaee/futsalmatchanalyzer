@@ -1,0 +1,30 @@
+# Short test clip (24 s) from the fixed panoramic camera.
+# Paths are relative to the project root (run commands from there).
+video: input/IMG_8267.MOV
+output_root: outputs
+
+teams: [Manzano, Jesolo]
+
+# Reference shirt colours (RGB) sampled from the clip. Adjust them if a kit is misread.
+kits:
+  - {name: Manzano, team: Manzano, role: player, rgb: [40, 55, 120]}     # blue
+  - {name: Jesolo, team: Jesolo, role: player, rgb: [85, 115, 78]}       # green
+  - {name: GK white, team: null, role: goalkeeper, rgb: [173, 178, 186]} # left goal; team still to confirm
+  - {name: GK red, team: null, role: goalkeeper, rgb: [145, 62, 56]}     # right goal; team still to confirm
+  - {name: Referee, role: referee, rgb: [125, 38, 60]}                   # pink
+
+# Black bars above/below the picture are removed automatically.
+crop: auto
+
+# Playing area in source pixels (1920x888). People whose feet fall outside
+# (benches, spectators) are ignored. Includes the sidelines where referees walk.
+court: [[60, 500], [250, 430], [520, 384], [700, 371], [1270, 370], [1560, 345], [1760, 360],
+        [1900, 440], [1900, 470], [1680, 560], [1640, 605], [330, 605]]
+
+detector:
+  model: models/yolo11m.pt
+  imgsz: 2560
+  stride: 2
+
+analysis:
+  possession_radius_px: 45
