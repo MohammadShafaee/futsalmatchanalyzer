@@ -4,6 +4,8 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import shutil
+import subprocess
 from collections import defaultdict
 from pathlib import Path
 
@@ -47,9 +49,11 @@ def render(run_dir: Path, dest: Path | None = None) -> Path:
 
     info = video.probe(src)
     dest = dest or run_dir / "annotated.mp4"
-    out = cv2.VideoWriter(str(dest), cv2.VideoWriter_fourcc(*"mp4v"), info.fps / stride, (info.width, bottom - top))
+    # write to a temporary file so an interrupted render never leaves a broken annotated.mp4
+    tmp = dest.with_name(dest.stem + ".partial.mp4")
+    out = cv2.VideoWriter(str(tmp), cv2.VideoWriter_fourcc(*"mp4v"), info.fps / stride, (info.width, bottom - top))
     if not out.isOpened():
-        raise RuntimeError(f"Cannot create {dest}")
+        raise RuntimeError(f"Cannot create {tmp}")
     held = defaultdict(int)
     try:
         for index, frame in video.frames(src, wanted=set(states)):
@@ -70,8 +74,23 @@ def render(run_dir: Path, dest: Path | None = None) -> Path:
             out.write(crop)
     finally:
         out.release()
+    _finish(tmp, dest)
     LOG.info("Annotated video: %s", dest)
     return dest
+
+
+def _finish(tmp: Path, dest: Path) -> None:
+    """Re-encode to H.264 when ffmpeg is available; mp4v does not play in most players."""
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        LOG.warning("ffmpeg not found; %s is mp4v and may not play everywhere", dest.name)
+        tmp.replace(dest)
+        return
+    h264 = dest.with_name(dest.stem + ".h264.mp4")
+    subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-i", str(tmp), "-c:v", "libx264", "-preset", "fast",
+                    "-crf", "23", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(h264)], check=True)
+    h264.replace(dest)
+    tmp.unlink()
 
 
 def _hud(frame, state: dict, held: dict, team_colors: dict) -> None:
