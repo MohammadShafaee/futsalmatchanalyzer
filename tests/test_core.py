@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from futsal import ball, config, metrics, tracks
+from futsal import ball, config, kits, metrics, tracks
 from futsal.config import AnalysisConfig, Kit
 from futsal.court import Court
 from futsal.detect import Detection, class_kinds
@@ -12,8 +12,14 @@ BLUE, GREEN, PINK = Kit("Blue", (40, 55, 120), "player", "A"), Kit("Green", (85,
     Kit("Ref", (125, 38, 60), "referee")
 
 
-def person(frame, x, y, tid, w=20, h=60):
-    return Detection(frame, "person", 0.9, x - w / 2, y - h, x + w / 2, y, tid)
+CLF = KitClassifier([BLUE, GREEN, PINK], max_distance=28, min_share=0.12)
+
+
+def person(frame, x, y, tid, w=20, h=60, kit=None):
+    d = Detection(frame, "person", 0.9, x - w / 2, y - h, x + w / 2, y, tid)
+    if kit is not None:
+        d.kit_shares = np.eye(3)[kit] * 0.6
+    return d
 
 
 def ball_at(frame, x, y, conf=0.5):
@@ -63,16 +69,43 @@ def test_kit_classifier_rejects_floor_only():
     assert clf.decide(clf.shares(floor, (0, 0, 40, 80)), 1) is None
 
 
+def test_floor_pixels_do_not_vote():
+    # dark wood is close enough to the green kit to steal votes unless it is masked out
+    dark_wood = (60, 100, 130)  # BGR
+    img = np.full((80, 40, 3), dark_wood, np.uint8)
+    img[10:45, 15:25] = BLUE.rgb[::-1]
+    floor = kits.estimate_background([np.full((50, 50, 3), dark_wood, np.uint8)], None, [BLUE, GREEN], 28, k=1)
+    clf = KitClassifier([BLUE, GREEN], 28, 0.12, floor)
+    shares = clf.shares(img, (0, 0, 40, 80))
+    assert shares[0] == pytest.approx(1.0) and shares[1] == 0
+
+
 def test_stitch_joins_fragments_of_same_player():
-    a = tracks.Track(1, [person(f, 100 + f, 300, 1) for f in range(0, 20, 2)], kit=BLUE)
-    b = tracks.Track(2, [person(f, 100 + f, 300, 2) for f in range(30, 50, 2)], kit=BLUE)
-    c = tracks.Track(3, [person(f, 110 + f, 300, 3) for f in range(30, 50, 2)], kit=GREEN)  # other team
-    for t in (a, b, c):
-        t.shares, t.samples = np.array([1.0, 0, 0]) if t.kit is BLUE else np.array([0, 1.0, 0]), 1
-    clf = KitClassifier([BLUE, GREEN, PINK], 28, 0.12)
-    merged = tracks.stitch({1: a, 2: b, 3: c}, clf, AnalysisConfig(), FPS)
+    a = tracks.Track(1, [person(f, 100 + f, 300, 1, kit=0) for f in range(0, 20, 2)], kit=BLUE)
+    b = tracks.Track(2, [person(f, 100 + f, 300, 2, kit=0) for f in range(30, 50, 2)], kit=BLUE)
+    c = tracks.Track(3, [person(f, 110 + f, 300, 3, kit=1) for f in range(30, 50, 2)], kit=GREEN)  # other team
+    merged = tracks.stitch({1: a, 2: b, 3: c}, CLF, AnalysisConfig(), FPS)
     assert sorted(merged) == [1, 3]
     assert merged[1].merged_ids == [1, 2] and merged[1].kit is BLUE
+
+
+def test_split_id_switch_when_shirt_changes():
+    # ByteTrack ID 1 follows a blue player, then jumps to the referee after they cross
+    dets = [person(f, 100, 300, 1, kit=0) for f in range(0, 20, 2)]
+    dets += [person(f, 100, 300, 1, kit=2) for f in range(20, 40, 2)]
+    dets[3].kit_shares = np.array([0, 0, 1.0])   # a single odd frame must not split
+    parts = tracks.split_id_switches({1: tracks.Track(1, dets)}, CLF, min_run=4)
+    assert [p.kit.name for p in parts.values()] == ["Blue", "Ref"]
+    assert len(parts[1].detections) == 10
+
+
+def test_role_limits_keep_one_goalkeeper_per_kit():
+    gk = Kit("GK A", (170, 170, 180), "goalkeeper", "A")
+    keeper = tracks.Track(1, [person(f, 100, 300, 1) for f in range(0, 100, 2)], kit=gk)
+    staff = tracks.Track(2, [person(f, 700, 200, 2) for f in range(40, 60, 2)], kit=gk)
+    later = tracks.Track(3, [person(f, 100, 300, 3) for f in range(120, 140, 2)], kit=gk)  # no overlap
+    tracks.enforce_role_limits({1: keeper, 2: staff, 3: later}, overlap_tolerance=4)
+    assert keeper.kit is gk and staff.kit is None and later.kit is gk
 
 
 def test_ball_trajectory_rejects_jump_and_interpolates():

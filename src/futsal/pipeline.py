@@ -8,7 +8,7 @@ from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 
-from . import ball, metrics, storage, tracks, video
+from . import ball, kits, metrics, storage, tracks, video
 from .config import Config
 from .court import Court
 from .detect import Detector
@@ -68,20 +68,29 @@ def analyze(cfg: Config, run_dir: Path) -> dict:
     by_track = tracks.group(people)
     raw_count = len(by_track)
 
-    classifier = KitClassifier(cfg.kits, cfg.analysis.kit_max_distance, cfg.analysis.kit_min_share)
+    sample = set(frames[::max(1, len(frames) // 8)])
+    floor = kits.estimate_background([f for _, f in video.frames(Path(meta["path"]), wanted=sample)],
+                                     court.polygon, cfg.kits, cfg.analysis.kit_max_distance)
+    classifier = KitClassifier(cfg.kits, cfg.analysis.kit_max_distance, cfg.analysis.kit_min_share, floor)
     by_frame: dict[int, list] = {}
     for t in by_track.values():
         for d in t.detections:
             by_frame.setdefault(d.frame, []).append((d, t))
     for index, frame in video.frames(Path(meta["path"]), wanted=set(by_frame)):
-        for d, t in by_frame[index]:
-            t.add_votes(classifier.shares(frame, (d.x1, d.y1, d.x2, d.y2)))
-    for t in by_track.values():
-        t.kit = classifier.decide(t.shares, t.samples) if t.shares is not None else None
+        for d, _ in by_frame[index]:
+            d.kit_shares = classifier.shares(frame, (d.x1, d.y1, d.x2, d.y2))
 
+    # ~0.5 s of consistently different shirt colour means ByteTrack switched people
+    min_run = max(3, round(0.5 * fps / stride))
+    if cfg.analysis.split_on_kit_change:
+        by_track = tracks.split_id_switches(by_track, classifier, min_run)
+    else:
+        for t in by_track.values():
+            t.decide_kit(classifier)
     stitched = tracks.stitch(by_track, classifier, cfg.analysis, fps)
     min_frames = max(1, round(cfg.analysis.min_track_s * fps / stride))
     kept = tracks.drop_short(stitched, min_frames)
+    tracks.enforce_role_limits(kept, overlap_tolerance=stride)
 
     ball_path = ball.trajectory(raw, frames, court, cfg.analysis, fps)
     states = metrics.possession(frames, ball_path, kept, cfg.analysis, fps)

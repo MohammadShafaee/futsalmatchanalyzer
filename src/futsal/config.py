@@ -37,9 +37,12 @@ class Kit:
 class AnalysisConfig:
     kit_max_distance: float = 28.0  # Lab distance for a torso pixel to vote for a kit
     kit_min_share: float = 0.12     # winning kit must cover this share of torso pixels
-    stitch_max_gap_s: float = 2.0   # join a track that ends with one that starts within this gap...
-    stitch_max_speed_px_s: float = 400.0  # ...if the jump is physically plausible
+    stitch_max_gap_s: float = 1.5   # join a track that ends with one that starts within this gap...
+    stitch_max_speed_px_s: float = 300.0  # ...if the jump is physically plausible
     min_track_s: float = 0.4        # drop shorter tracks (usually false positives)
+    # cut tracks where ByteTrack swapped two differently dressed people; off by default because on
+    # the test clip it cut more correct tracks than it fixed (count accuracy 28% -> 22%)
+    split_on_kit_change: bool = False
     ball_max_speed_px_s: float = 2500.0
     ball_max_gap_s: float = 0.8     # interpolate missing ball positions up to this gap
     possession_radius_px: float = 45.0
@@ -54,6 +57,8 @@ class Config:
     kits: list[Kit] = field(default_factory=list)
     crop: str | list[int] = "auto"  # "auto", "none" or [y_top, y_bottom] in source pixels
     court: list[tuple[int, int]] | None = None  # polygon in source pixels; feet outside are ignored
+    # how many people of each kit should be visible on court; used only to score accuracy
+    expected_on_court: dict[str, int] = field(default_factory=dict)
     detector: DetectorConfig = field(default_factory=DetectorConfig)
     analysis: AnalysisConfig = field(default_factory=AnalysisConfig)
 
@@ -89,6 +94,9 @@ def load(path: Path) -> Config:
         cfg.court = [tuple(int(v) for v in p) for p in cfg.court]
     if cfg.detector.stride < 1:
         raise ValueError("detector.stride must be at least 1")
+    for name in cfg.expected_on_court:
+        if cfg.kit(name) is None:
+            raise ValueError(f"expected_on_court: unknown kit {name!r}")
     for k in kits:
         if k.team is not None and k.team not in cfg.teams:
             raise ValueError(f"Kit {k.name}: team {k.team!r} is not in teams {cfg.teams}")

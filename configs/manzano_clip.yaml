@@ -9,8 +9,8 @@ teams: [Manzano, Jesolo]
 kits:
   - {name: Manzano, team: Manzano, role: player, rgb: [40, 55, 120]}     # blue
   - {name: Jesolo, team: Jesolo, role: player, rgb: [85, 115, 78]}       # green
-  - {name: GK white, team: null, role: goalkeeper, rgb: [173, 178, 186]} # left goal; team still to confirm
-  - {name: GK red, team: null, role: goalkeeper, rgb: [145, 62, 56]}     # right goal; team still to confirm
+  - {name: GK Manzano, team: Manzano, role: goalkeeper, rgb: [173, 178, 186]} # white
+  - {name: GK Jesolo, team: Jesolo, role: goalkeeper, rgb: [145, 62, 56]}     # red
   - {name: Referee, role: referee, rgb: [125, 38, 60]}                   # pink
 
 # Black bars above/below the picture are removed automatically.
@@ -19,7 +19,13 @@ crop: auto
 # Playing area in source pixels (1920x888). People whose feet fall outside
 # (benches, spectators) are ignored. Includes the sidelines where referees walk.
 court: [[60, 500], [250, 430], [520, 384], [700, 371], [1270, 370], [1560, 345], [1760, 360],
-        [1900, 440], [1900, 470], [1680, 560], [1640, 605], [330, 605]]
+        [1900, 440], [1900, 470], [1680, 540], [1450, 580], [1420, 620], [330, 620]]
+# The bottom edge lies below the picture so people cut off at the bottom still count;
+# the bottom-right corner (spectators behind the barrier) is excluded.
+
+# Used to score accuracy: how many people of each kit should be visible at any time.
+# (The second referee walks along the far side, mostly outside the polygon.)
+expected_on_court: {Manzano: 4, Jesolo: 4, GK Manzano: 1, GK Jesolo: 1, Referee: 1}
 
 detector:
   model: models/yolo11m.pt

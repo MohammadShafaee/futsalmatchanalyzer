@@ -28,26 +28,65 @@ def torso(frame: np.ndarray, box: tuple[float, float, float, float]) -> np.ndarr
     return crop if crop.size else None
 
 
+def _weighted_lab(bgr: np.ndarray) -> np.ndarray:
+    lab = to_lab(bgr).reshape(-1, 3)
+    lab[:, 0] *= L_WEIGHT
+    return lab
+
+
+def estimate_background(frames: list[np.ndarray], polygon: np.ndarray | None, kits: list[Kit],
+                        max_distance: float, k: int = 6, samples: int = 20000) -> np.ndarray:
+    """Typical floor colours (weighted Lab) from pixels inside the court.
+
+    Players cover a small part of the court, so k-means centres describe the floor.
+    Centres nearly identical to a kit colour (white lines vs. a white goalkeeper shirt, ~11 apart)
+    are discarded; dark wood vs. a dark green shirt (~27 apart) must stay masked.
+    """
+    rng = np.random.default_rng(0)
+    pixels = []
+    for frame in frames:
+        mask = np.ones(frame.shape[:2], np.uint8)
+        if polygon is not None:
+            mask[:] = 0
+            cv2.fillPoly(mask, [polygon.astype(np.int32)], 1)
+        pts = frame[mask.astype(bool)]
+        pixels.append(pts[rng.choice(len(pts), min(len(pts), samples // len(frames)), replace=False)])
+    lab = _weighted_lab(np.concatenate(pixels).reshape(-1, 1, 3)).astype(np.float32)
+    crit = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 50, .5)
+    _, _, centers = cv2.kmeans(lab, k, None, crit, 3, cv2.KMEANS_PP_CENTERS)
+    kit_refs = KitClassifier(kits, max_distance, 0).refs
+    if len(kit_refs):
+        near_kit = np.linalg.norm(centers[:, None] - kit_refs[None], axis=2).min(axis=1) < max_distance / 2
+        centers = centers[~near_kit]
+    return centers
+
+
 class KitClassifier:
-    def __init__(self, kits: list[Kit], max_distance: float, min_share: float):
+    MIN_PIXELS = 12
+
+    def __init__(self, kits: list[Kit], max_distance: float, min_share: float,
+                 background: np.ndarray | None = None):
         self.kits = kits
         self.max_distance = max_distance
         self.min_share = min_share
-        rgb = np.array([k.rgb for k in kits], dtype=np.uint8).reshape(-1, 3)
-        self.refs = to_lab(rgb[:, ::-1].copy())
-        self.refs[:, 0] *= L_WEIGHT
+        rgb = np.array([k.rgb for k in kits], dtype=np.uint8).reshape(-1, 1, 3)
+        self.refs = _weighted_lab(rgb[:, :, ::-1].copy())
+        self.background = np.zeros((0, 3), np.float32) if background is None else background
 
     def shares(self, frame: np.ndarray, box) -> np.ndarray | None:
-        """Share of torso pixels voting for each kit, or None when the box is too small."""
+        """Share of non-floor torso pixels voting for each kit; None when too few pixels."""
         crop = torso(frame, box)
         if crop is None or not self.kits:
             return None
-        lab = to_lab(crop).reshape(-1, 3)
-        lab[:, 0] *= L_WEIGHT
-        dist = np.linalg.norm(lab[:, None, :] - self.refs[None, :, :], axis=2)
+        lab = _weighted_lab(crop)
+        refs = np.concatenate([self.refs, self.background])
+        dist = np.linalg.norm(lab[:, None, :] - refs[None, :, :], axis=2)
         nearest = dist.argmin(axis=1)
-        close = dist[np.arange(len(lab)), nearest] <= self.max_distance
-        return np.bincount(nearest[close], minlength=len(self.kits)) / len(lab)
+        shirt = nearest < len(self.kits)          # pixels closest to a floor colour are ignored
+        if shirt.sum() < self.MIN_PIXELS:
+            return None
+        close = shirt & (dist[np.arange(len(lab)), nearest] <= self.max_distance)
+        return np.bincount(nearest[close], minlength=len(self.kits))[:len(self.kits)] / shirt.sum()
 
     def decide(self, total_shares: np.ndarray, samples: int) -> Kit | None:
         if samples == 0:

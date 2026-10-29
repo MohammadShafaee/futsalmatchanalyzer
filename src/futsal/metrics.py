@@ -112,6 +112,12 @@ def summarize(cfg: Config, fps: float, stride: int, frames: list[int], tracks: d
         "median_people_per_frame": {k: statistics.median(per_frame[f][k] for f in frames) if frames else 0
                                     for k in labels},
     }
+    if cfg.expected_on_court:
+        # share of frames where each kit is seen exactly the expected number of times
+        expected = cfg.expected_on_court
+        exact = {k: round(100 * sum(per_frame[f][k] == want for f in frames) / n, 1) for k, want in expected.items()}
+        all_ok = sum(all(per_frame[f][k] == want for k, want in expected.items()) for f in frames)
+        quality["expected_count_match_percent"] = {**exact, "all": round(100 * all_ok / n, 1)}
     return {"teams": teams, "quality": quality, "players": players, "limitations": [
         "Possession uses proximity to the ball, not verified contact.",
         "Distances are in image pixels; court calibration is needed for metres.",

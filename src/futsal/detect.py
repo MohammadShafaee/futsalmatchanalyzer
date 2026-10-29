@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import SimpleNamespace
 
 import numpy as np
@@ -26,6 +26,7 @@ class Detection:
     x2: float
     y2: float
     track_id: int | None = None
+    kit_shares: np.ndarray | None = field(default=None, repr=False)  # filled during analysis
 
     @property
     def foot(self) -> tuple[float, float]:
