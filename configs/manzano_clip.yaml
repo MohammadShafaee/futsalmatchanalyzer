@@ -29,9 +29,12 @@ court: [[0, 545], [80, 515], [470, 370], [640, 372], [1000, 373], [1280, 370], [
 expected_on_court: {Manzano: 4, Jesolo: 4, GK Manzano: 1, GK Jesolo: 1, Referee: 1}
 
 detector:
-  model: models/yolo11m.pt
+  model: models/yolo11x.pt        # largest model: better on partly hidden players
+  track_high_thresh: 0.2         # keep weaker detections of players hidden behind others
+  new_track_thresh: 0.25
   imgsz: 2560
   stride: 2
 
 analysis:
+  split_on_kit_change: true   # with yolo11x, cutting tracks where ByteTrack swaps players helps (19.5% -> 44.5%)
   possession_radius_px: 45
