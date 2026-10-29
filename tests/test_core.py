@@ -108,6 +108,15 @@ def test_role_limits_keep_one_goalkeeper_per_kit():
     assert keeper.kit is gk and staff.kit is None and later.kit is gk
 
 
+def test_fill_gaps_interpolates_short_occlusions_only():
+    dets = [person(0, 100, 300, 1), person(8, 140, 300, 1), person(40, 140, 300, 1)]
+    t = tracks.Track(1, dets)
+    tracks.fill_gaps({1: t}, stride=2, max_gap=10)
+    assert [d.frame for d in t.detections] == [0, 2, 4, 6, 8, 40]   # 32-frame gap stays empty
+    assert t.detections[2].interpolated and t.detections[2].foot == pytest.approx((120, 300))
+    assert not t.detections[4].interpolated
+
+
 def test_ball_trajectory_rejects_jump_and_interpolates():
     frames = list(range(0, 12, 2))
     dets = [ball_at(0, 100, 100), ball_at(2, 110, 100), ball_at(2, 900, 100, conf=0.2),  # far false positive

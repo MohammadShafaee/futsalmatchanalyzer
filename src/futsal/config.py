@@ -40,6 +40,7 @@ class AnalysisConfig:
     stitch_max_gap_s: float = 1.5   # join a track that ends with one that starts within this gap...
     stitch_max_speed_px_s: float = 300.0  # ...if the jump is physically plausible
     min_track_s: float = 0.4        # drop shorter tracks (usually false positives)
+    fill_max_gap_s: float = 1.0     # interpolate a player hidden behind another for up to this long
     # cut tracks where ByteTrack swapped two differently dressed people; off by default because on
     # the test clip it cut more correct tracks than it fixed (count accuracy 28% -> 22%)
     split_on_kit_change: bool = False

@@ -41,12 +41,12 @@ def write_detections(path: Path, tracks: dict[int, Track], fps: float) -> None:
     with path.open("w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
         w.writerow(["timestamp_s", "frame", "track_id", "kit", "team", "role", "conf",
-                    "x1", "y1", "x2", "y2", "foot_x", "foot_y"])
+                    "x1", "y1", "x2", "y2", "foot_x", "foot_y", "source"])
         for d, t in rows:
             k = t.kit
             w.writerow([round(d.frame / fps, 3), d.frame, t.id, k.name if k else "", (k.team or "") if k else "",
                         k.role if k else "", d.conf, *(round(float(v), 1) for v in (d.x1, d.y1, d.x2, d.y2)),
-                        round(d.foot[0], 1), round(d.foot[1], 1)])
+                        round(d.foot[0], 1), round(d.foot[1], 1), "interpolated" if d.interpolated else "detected"])
 
 
 def write_frames(path: Path, states: list[FrameState], fps: float) -> None:

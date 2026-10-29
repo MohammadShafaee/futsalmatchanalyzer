@@ -61,7 +61,8 @@ def render(run_dir: Path, dest: Path | None = None) -> Path:
             for r in people.get(index, []):
                 x1, y1, x2, y2 = (int(float(r[k])) for k in ("x1", "y1", "x2", "y2"))
                 color = colors.get(r["kit"], GREY)
-                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                thickness = 1 if r.get("source") == "interpolated" else 2
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
                 cv2.putText(frame, _label(r), (x1, y1 - 4), FONT, .45, color, 1, cv2.LINE_AA)
             s = states[index]
             if s["ball_x"]:

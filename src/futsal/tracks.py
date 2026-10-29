@@ -163,5 +163,25 @@ def enforce_role_limits(tracks: dict[int, Track], overlap_tolerance: int) -> Non
                     t.kit = None
 
 
+def fill_gaps(tracks: dict[int, Track], stride: int, max_gap: int) -> None:
+    """Linearly interpolate boxes where a track misses analysed frames for at most `max_gap` frames.
+
+    In futsal players often hide behind each other for a moment; YOLO loses them but they are on court.
+    """
+    for t in tracks.values():
+        filled = []
+        for a, b in zip(t.detections, t.detections[1:]):
+            filled.append(a)
+            gap = b.frame - a.frame
+            if gap <= stride or gap > max_gap:
+                continue
+            for f in range(a.frame + stride, b.frame, stride):
+                w = (f - a.frame) / gap
+                box = (av + w * (bv - av) for av, bv in zip((a.x1, a.y1, a.x2, a.y2), (b.x1, b.y1, b.x2, b.y2)))
+                filled.append(Detection(f, a.kind, 0.0, *box, track_id=t.id, interpolated=True))
+        filled.append(t.detections[-1])
+        t.detections = filled
+
+
 def drop_short(tracks: dict[int, Track], min_frames: int) -> dict[int, Track]:
     return {tid: t for tid, t in tracks.items() if len(t.detections) >= min_frames}

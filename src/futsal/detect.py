@@ -27,6 +27,7 @@ class Detection:
     y2: float
     track_id: int | None = None
     kit_shares: np.ndarray | None = field(default=None, repr=False)  # filled during analysis
+    interpolated: bool = False  # filled in between two real detections of the same track
 
     @property
     def foot(self) -> tuple[float, float]:

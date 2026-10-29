@@ -91,6 +91,7 @@ def analyze(cfg: Config, run_dir: Path) -> dict:
     min_frames = max(1, round(cfg.analysis.min_track_s * fps / stride))
     kept = tracks.drop_short(stitched, min_frames)
     tracks.enforce_role_limits(kept, overlap_tolerance=stride)
+    tracks.fill_gaps(kept, stride, round(cfg.analysis.fill_max_gap_s * fps))
 
     ball_path = ball.trajectory(raw, frames, court, cfg.analysis, fps)
     states = metrics.possession(frames, ball_path, kept, cfg.analysis, fps)
