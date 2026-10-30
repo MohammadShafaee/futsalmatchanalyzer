@@ -51,6 +51,30 @@ class AnalysisConfig:
 
 
 @dataclass
+class Goals:
+    """Two points (source pixels) on each goal line, e.g. the bottoms of the posts, and the halfway line's x.
+
+    Used to place people between the goals (0 = left goal line, 1 = right) for the coach report.
+    """
+    left: list[tuple[float, float]]
+    right: list[tuple[float, float]]
+    halfway_x: float
+
+
+@dataclass
+class ArbiterConfig:
+    """A vision-language model settles tracks the colour rules can't (see arbiter.py)."""
+    enabled: bool = False
+    model: str = "gemini-3.5-flash"
+    max_calls: int = 300            # per run; answers are cached, so re-analysing costs nothing
+    min_track_s: float = 1.0        # shorter tracks aren't worth a question
+    vote_margin: float = 0.4        # ask when the runner-up kit gets within this share of the winner
+    edge_px: float = 15.0           # ask when the median foot position is this close to the court edge
+    min_confidence: float = 0.6     # apply only answers at least this confident
+    min_interval_s: float = 13.0    # seconds between calls: the free tier allows 5 per minute
+
+
+@dataclass
 class Config:
     video: Path
     output_root: Path = Path("outputs")
@@ -62,6 +86,8 @@ class Config:
     expected_on_court: dict[str, int] = field(default_factory=dict)
     detector: DetectorConfig = field(default_factory=DetectorConfig)
     analysis: AnalysisConfig = field(default_factory=AnalysisConfig)
+    arbiter: ArbiterConfig = field(default_factory=ArbiterConfig)
+    goals: Goals | None = None
 
     def kit(self, name: str | None) -> Kit | None:
         return next((k for k in self.kits if k.name == name), None)
@@ -88,7 +114,9 @@ def load(path: Path) -> Config:
             raise ValueError(f"Kit {k.name}: role must be one of {ROLES}")
     cfg = _build(Config, {**data, "kits": kits,
                           "detector": _build(DetectorConfig, data.get("detector")),
-                          "analysis": _build(AnalysisConfig, data.get("analysis"))})
+                          "analysis": _build(AnalysisConfig, data.get("analysis")),
+                          "arbiter": _build(ArbiterConfig, data.get("arbiter")),
+                          "goals": _build(Goals, data["goals"]) if data.get("goals") else None})
     cfg.video = Path(cfg.video)
     cfg.output_root = Path(cfg.output_root)
     if cfg.court is not None:

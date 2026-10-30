@@ -1,8 +1,10 @@
+import json
+
 import numpy as np
 import pytest
 
-from futsal import ball, config, kits, metrics, tracks
-from futsal.config import AnalysisConfig, Kit
+from futsal import arbiter, ball, config, kits, metrics, tracks
+from futsal.config import AnalysisConfig, ArbiterConfig, Kit
 from futsal.court import Court
 from futsal.detect import Detection, class_kinds
 from futsal.kits import KitClassifier
@@ -115,6 +117,39 @@ def test_fill_gaps_interpolates_short_occlusions_only():
     assert [d.frame for d in t.detections] == [0, 2, 4, 6, 8, 40]   # 32-frame gap stays empty
     assert t.detections[2].interpolated and t.detections[2].foot == pytest.approx((120, 300))
     assert not t.detections[4].interpolated
+
+
+def test_arbiter_asks_only_about_uncertain_tracks():
+    clear = tracks.Track(1, [person(f, 300, 300, 1, kit=0) for f in range(0, 60, 2)])
+    close = tracks.Track(2, [person(f, 300, 300, 2) for f in range(0, 60, 2)])
+    for d in close.detections:
+        d.kit_shares = np.array([0.35, 0.3, 0.0])     # blue barely ahead of green
+    edge = tracks.Track(3, [person(f, 300, 101, 3, kit=1) for f in range(0, 60, 2)])
+    poly = np.float32([[0, 100], [600, 100], [600, 500], [0, 500]]).reshape(-1, 1, 2)
+    cfg = ArbiterConfig()
+    assert arbiter._uncertain(clear, CLF, poly, cfg) is None
+    assert arbiter._uncertain(close, CLF, poly, cfg) == "two kits close"
+    assert arbiter._uncertain(edge, CLF, poly, cfg) == "at the court edge"
+
+
+def test_arbiter_applies_cached_answers(tmp_path):
+    kits_ = [BLUE, GREEN, PINK]
+    sub = tracks.Track(1, [person(f, 300, 101, 1, kit=0) for f in range(0, 60, 2)])        # substitute by the bench
+    unsure = tracks.Track(2, [person(f, 300, 300, 2, kit=0) for f in range(0, 60, 2)])
+    swapped = tracks.Track(3, [person(f, 300, 300, 3, kit=0) for f in range(0, 80, 2)])   # blue, then the referee
+    (tmp_path / arbiter.CACHE).write_text(json.dumps({
+        "1": {"label": arbiter.NOT_PLAYING, "confidence": 0.9},
+        "2": {"label": "Green", "confidence": 0.9},
+        "3": {"label": arbiter.MIXED, "confidence": 0.9, "closeups": ["Blue", "Blue", "Ref", "Ref"]},
+    }), encoding="utf-8")
+    kept = arbiter.resolve({1: sub, 2: unsure, 3: swapped}, CLF, kits_, ArbiterConfig(max_calls=0), None, tmp_path,
+                           None, FPS, 2)
+    assert sorted(kept) == [2, 3]
+    assert all(d.kit_shares.argmax() == 1 for d in unsure.detections)
+    labels = [d.kit_shares.argmax() for d in swapped.detections]
+    assert labels[0] == 0 and labels[-1] == 2       # each side of the swap is pinned to its own kit
+    parts = tracks.split_id_switches({3: swapped}, CLF, min_run=4)
+    assert [p.kit.name for p in parts.values()] == ["Blue", "Ref"]
 
 
 def test_ball_trajectory_rejects_jump_and_interpolates():

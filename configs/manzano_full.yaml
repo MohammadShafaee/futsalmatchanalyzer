@@ -1,0 +1,40 @@
+# Full match (84 min including breaks) from the wide-angle camera in the stand, same hall as the clip.
+# Paths are relative to the project root (run commands from there).
+video: "D:/Football Match Analyzer/Manzano-Jesolo.App.mp4"
+output_root: outputs
+
+teams: [Manzano, Jesolo]
+
+# Reference shirt colours (RGB) sampled from the match (k-means over on-court torsos).
+# Blue = Manzano and red = Jesolo as in the clip; goalkeeper teams still to confirm.
+kits:
+  - {name: Manzano, team: Manzano, role: player, rgb: [55, 70, 130]}          # blue
+  - {name: Jesolo, team: Jesolo, role: player, rgb: [150, 50, 65]}            # red
+  - {name: GK Manzano, team: Manzano, role: goalkeeper, rgb: [185, 188, 195]} # white
+  - {name: GK Jesolo, team: Jesolo, role: goalkeeper, rgb: [50, 125, 70]}     # green
+  - {name: Referee, role: referee, rgb: [190, 200, 70]}                       # fluorescent yellow
+
+# Rows of the picture that hold the court (ceiling and the stand in front are dropped).
+crop: [290, 670]
+
+# Playing area in source pixels (1920x1080), 10 px outside the goal lines (drawn through the goal posts)
+# and just inside the far touchline so the seated substitutes stay out. The near touchline is the blue
+# line at y~580; spectators behind the fence stand lower in the picture.
+court: [[0, 570], [465, 368], [640, 371], [960, 369], [1280, 372], [1455, 370], [1920, 590], [1920, 600], [0, 600]]
+
+# Goal lines (through the bottoms of the posts) and the halfway line, for the coach report.
+goals: {left: [[274, 449], [334, 424]], right: [[1594, 436], [1656, 465]], halfway_x: 965}
+
+# Used to score accuracy: how many people of each kit should be visible at any time.
+expected_on_court: {Manzano: 4, Jesolo: 4, GK Manzano: 1, GK Jesolo: 1, Referee: 2}
+
+detector:
+  model: models/yolo11x.pt        # largest model, now on the GPU (~0.35 s per frame at 2560)
+  track_high_thresh: 0.2
+  new_track_thresh: 0.25
+  imgsz: 2560
+  stride: 4                       # 7.5 analysed frames per second: ~38,000 frames, ~4-4.5 h
+
+analysis:
+  split_on_kit_change: true
+  possession_radius_px: 45

@@ -24,6 +24,9 @@ court: [[0, 545], [80, 515], [470, 370], [640, 372], [1000, 373], [1280, 370], [
 # bench (feet at y~365-370) stay outside. The bottom edge lies below the picture so people cut off at the
 # bottom still count; the bottom-right corner (spectators behind the barrier) is excluded along the fence.
 
+# Goal lines (through the bottoms of the posts) and the halfway line, for the coach report.
+goals: {left: [[295, 433], [362, 415]], right: [[1640, 378], [1705, 395]], halfway_x: 997}
+
 # Used to score accuracy: how many people of each kit should be visible at any time.
 # (The second referee walks along the far side, mostly outside the polygon.)
 expected_on_court: {Manzano: 4, Jesolo: 4, GK Manzano: 1, GK Jesolo: 1, Referee: 1}

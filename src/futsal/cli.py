@@ -1,11 +1,11 @@
-"""Command line: python -m futsal {run,analyze,render} ..."""
+"""Command line: python -m futsal {run,analyze,render,export} ..."""
 from __future__ import annotations
 
 import argparse
 import logging
 from pathlib import Path
 
-from . import config, pipeline
+from . import config, pipeline, report
 from .render import render
 
 LOG = logging.getLogger("futsal")
@@ -29,6 +29,11 @@ def parse(argv=None):
     ren = sub.add_parser("render", help="Draw an analyzed run over its video")
     ren.add_argument("run_dir", type=Path)
     ren.add_argument("--output", type=Path)
+
+    exp = sub.add_parser("export", help="Write the coach-report data (heatmaps, timeline...) of an analyzed run")
+    exp.add_argument("config", type=Path)
+    exp.add_argument("run_dir", type=Path)
+    exp.add_argument("--output", type=Path, help="Default: <run_dir>/report")
     return p.parse_args(argv)
 
 
@@ -50,6 +55,9 @@ def main(argv=None) -> int:
             pipeline.analyze(config.load(a.config), a.run_dir)
             if a.render:
                 render(a.run_dir)
+        elif a.command == "export":
+            sizes = report.export(config.load(a.config), a.run_dir, a.output or a.run_dir / "report")
+            LOG.info("Report data: %s", sizes)
         else:
             render(a.run_dir, a.output)
     except (FileNotFoundError, ValueError, RuntimeError) as e:
