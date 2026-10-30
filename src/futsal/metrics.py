@@ -115,9 +115,14 @@ def summarize(cfg: Config, fps: float, stride: int, frames: list[int], tracks: d
     if cfg.expected_on_court:
         # share of frames where each kit is seen exactly the expected number of times
         expected = cfg.expected_on_court
-        exact = {k: round(100 * sum(per_frame[f][k] == want for f in frames) / n, 1) for k, want in expected.items()}
-        all_ok = sum(all(per_frame[f][k] == want for k, want in expected.items()) for f in frames)
-        quality["expected_count_match_percent"] = {**exact, "all": round(100 * all_ok / n, 1)}
+        scored = frames
+        if cfg.in_play:
+            scored = [f for f in frames if any(a <= f / fps < b for a, b in cfg.in_play)]
+            quality["in_play_frames"] = len(scored)
+        m = len(scored) or 1
+        exact = {k: round(100 * sum(per_frame[f][k] == want for f in scored) / m, 1) for k, want in expected.items()}
+        all_ok = sum(all(per_frame[f][k] == want for k, want in expected.items()) for f in scored)
+        quality["expected_count_match_percent"] = {**exact, "all": round(100 * all_ok / m, 1)}
     return {"teams": teams, "quality": quality, "players": players, "limitations": [
         "Possession uses proximity to the ball, not verified contact.",
         "Distances are in image pixels; court calibration is needed for metres.",

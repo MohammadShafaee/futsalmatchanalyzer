@@ -19,14 +19,20 @@ crop: [290, 670]
 
 # Playing area in source pixels (1920x1080), 10 px outside the goal lines (drawn through the goal posts)
 # and just inside the far touchline so the seated substitutes stay out. The near touchline is the blue
-# line at y~580; spectators behind the fence stand lower in the picture.
-court: [[0, 570], [465, 368], [640, 371], [960, 369], [1280, 372], [1455, 370], [1920, 590], [1920, 600], [0, 600]]
+# line at y~580; the referee runs below it with feet down to y~606, while the spectators behind the
+# fence (left end) and the staff at the bottom-right corner stand lower or further right, so those
+# two stretches stay tighter. (Moving the far edge 6 px down to drop the bench lost real players.)
+court: [[0, 570], [465, 368], [640, 371], [960, 369], [1280, 372], [1455, 370], [1920, 585], [1780, 585],
+        [1700, 600], [1690, 607], [330, 607], [320, 600], [0, 600]]
 
 # Goal lines (through the bottoms of the posts) and the halfway line, for the coach report.
 goals: {left: [[274, 449], [334, 424]], right: [[1594, 436], [1656, 465]], halfway_x: 965}
 
 # Used to score accuracy: how many people of each kit should be visible at any time.
 expected_on_court: {Manzano: 4, Jesolo: 4, GK Manzano: 1, GK Jesolo: 1, Referee: 2}
+# The video is edited: half-time is only the empty court at 36:05-37:05, and the teams leave the
+# court after 79:05. Accuracy is scored inside these periods only.
+in_play: [[0, 2165], [2225, 4745]]
 
 detector:
   model: models/yolo11x.pt        # largest model, now on the GPU (~0.35 s per frame at 2560)
@@ -44,4 +50,7 @@ arbiter:
 
 analysis:
   split_on_kit_change: true
+  # the far camera loses players behind others for longer than on the clip: 2 s raised the in-play
+  # count accuracy from 2.6% to 4.5% (3-4 s added nothing; looser kit-colour rules changed nothing)
+  fill_max_gap_s: 2.0
   possession_radius_px: 45

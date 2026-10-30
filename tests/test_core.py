@@ -174,3 +174,15 @@ def test_possession_needs_sustained_control():
     assert owners[0] is None          # control must last possession_min_s first
     assert owners[3] == "A" and owners[-1] == "B"
     assert owners[5] == "A"           # B touched at frame 10 but has not held it long enough yet
+
+
+def test_count_accuracy_scores_only_in_play_frames():
+    frames = list(range(0, 120, 2))
+    # one Blue player on court for the first two seconds only; then a break with the court empty
+    t = tracks.Track(1, [person(f, 100, 300, 1) for f in frames if f < 60], kit=BLUE)
+    cfg = config.Config(video="x.mp4", teams=["A", "B"], kits=[BLUE, GREEN, PINK], expected_on_court={"Blue": 1})
+    states = metrics.possession(frames, {}, {1: t}, AnalysisConfig(), FPS)
+    assert metrics.summarize(cfg, FPS, 2, frames, {1: t}, 1, states)["quality"]["expected_count_match_percent"]["all"] == 50
+    cfg.in_play = [(0.0, 2.0)]
+    q = metrics.summarize(cfg, FPS, 2, frames, {1: t}, 1, states)["quality"]
+    assert q["expected_count_match_percent"]["all"] == 100 and q["in_play_frames"] == 30

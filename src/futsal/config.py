@@ -84,6 +84,8 @@ class Config:
     court: list[tuple[int, int]] | None = None  # polygon in source pixels; feet outside are ignored
     # how many people of each kit should be visible on court; used only to score accuracy
     expected_on_court: dict[str, int] = field(default_factory=dict)
+    # [start_s, end_s] stretches with a game on; accuracy skips the rest (warm-up, half-time, after the match)
+    in_play: list[tuple[float, float]] | None = None
     detector: DetectorConfig = field(default_factory=DetectorConfig)
     analysis: AnalysisConfig = field(default_factory=AnalysisConfig)
     arbiter: ArbiterConfig = field(default_factory=ArbiterConfig)
@@ -121,6 +123,10 @@ def load(path: Path) -> Config:
     cfg.output_root = Path(cfg.output_root)
     if cfg.court is not None:
         cfg.court = [tuple(int(v) for v in p) for p in cfg.court]
+    if cfg.in_play is not None:
+        cfg.in_play = [(float(a), float(b)) for a, b in cfg.in_play]
+        if any(a >= b for a, b in cfg.in_play):
+            raise ValueError("in_play: each period must be [start_s, end_s] with start < end")
     if cfg.detector.stride < 1:
         raise ValueError("detector.stride must be at least 1")
     for name in cfg.expected_on_court:
