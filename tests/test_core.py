@@ -162,6 +162,17 @@ def test_ball_trajectory_rejects_jump_and_interpolates():
     assert 10 not in path
 
 
+def test_ball_trajectory_ignores_a_lamp_seen_all_match():
+    frames = list(range(0, 4000, 2))
+    lamp = [ball_at(f, 1440, 370, conf=0.6) for f in frames]
+    real = [ball_at(f, 300 + f, 400) for f in frames[:20]]
+    cfg = AnalysisConfig(ball_hotspot_max_share=0.02)
+    path = ball.trajectory(lamp + real, frames, Court(None), cfg, FPS)
+    assert all(p.x != 1440 for p in path.values())
+    assert path[10].x == 310 and len(path) == 20
+    assert any(p.x == 1440 for p in ball.trajectory(lamp, frames, Court(None), AnalysisConfig(), FPS).values())
+
+
 def test_possession_needs_sustained_control():
     cfg = AnalysisConfig(possession_min_s=0.1, possession_radius_px=20)
     frames = list(range(0, 20, 2))

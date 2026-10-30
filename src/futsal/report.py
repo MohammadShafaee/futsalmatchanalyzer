@@ -79,7 +79,10 @@ def export(cfg: Config, run_dir: Path, out: Path) -> dict:
     duration = meta["duration_s"]
 
     halftime, home_left = _halftime(cfg, dets, home)
+    if cfg.in_play and len(cfg.in_play) >= 2:
+        halftime = cfg.in_play[1][0]  # the configured periods beat the goalkeeper guess
     half_of = (lambda t: 1) if halftime is None else (lambda t: 1 if t < halftime else 2)
+    live = (lambda t: True) if not cfg.in_play else (lambda t: any(a <= t < b for a, b in cfg.in_play))
 
     def home_view(u: float, t: float) -> float:
         """Position between the goals as seen by the home team (0 = its own goal)."""
@@ -120,7 +123,8 @@ def export(cfg: Config, run_dir: Path, out: Path) -> dict:
             bx, by = float(f["ball_x"]), float(f["ball_y"])
             cells[("Ball", half_of(t), int(bx // CELL), int((min(by, bottom - 1) - top) // CELL))] += step
             bu = home_view(along(cfg, bx, by), t)
-            zones[(half_of(t), "own" if bu < 1 / 3 else "middle" if bu < 2 / 3 else "attack")] += step
+            if live(t):
+                zones[(half_of(t), "own" if bu < 1 / 3 else "middle" if bu < 2 / 3 else "attack")] += step
         timeline_src.append((t, f["possession_team"], bu, f["frame"]))
 
     heat = [{"layer": layer, "half": half, "x": (gx + .5) * CELL, "y": (gy + .5) * CELL, "s": round(s, 2)}
@@ -146,8 +150,8 @@ def export(cfg: Config, run_dir: Path, out: Path) -> dict:
     timeline = [{"min": round(w * window / 60, 3), "half": half_of(w * window),
                  "home_poss_s": round(b["home"], 2), "away_poss_s": round(b["away"], 2),
                  "ball_u": mean(b["ball"]), "home_u": mean(b["hu"]), "away_u": mean(b["au"]),
-                 # play is on when most outfield players are on court; breaks and warm-ups are flagged off
-                 "in_play": bool(statistics.median(b["players"]) >= 5)}
+                 # the configured play periods, else: play is on when most outfield players are on court
+                 "in_play": live(w * window) if cfg.in_play else bool(statistics.median(b["players"]) >= 5)}
                 for w, b in sorted(buckets.items())]
 
     zone_names = {"own": f"{home} defensive third", "middle": "Middle third", "attack": f"{home} attacking third"}

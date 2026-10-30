@@ -53,4 +53,7 @@ analysis:
   # the far camera loses players behind others for longer than on the clip: 2 s raised the in-play
   # count accuracy from 2.6% to 4.5% (3-4 s added nothing; looser kit-colour rules changed nothing)
   fill_max_gap_s: 2.0
+  # the round wall lamps at floor level behind the far touchline (x~1400-1520, y~340-390) are seen as
+  # a ball in up to half of all frames; the real ball's busiest 24 px cell (centre spot) is ~1.3%
+  ball_hotspot_max_share: 0.02
   possession_radius_px: 45

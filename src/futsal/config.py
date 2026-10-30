@@ -46,6 +46,9 @@ class AnalysisConfig:
     split_on_kit_change: bool = False
     ball_max_speed_px_s: float = 2500.0
     ball_max_gap_s: float = 0.8     # interpolate missing ball positions up to this gap
+    # ignore 'balls' in a 24 px cell that holds one in more than this share of all frames (round lamps,
+    # a spare ball); only for long videos: in a short clip the real ball can rest in one spot that long
+    ball_hotspot_max_share: float | None = None
     possession_radius_px: float = 45.0
     possession_min_s: float = 0.3   # control must last this long before possession switches
 
