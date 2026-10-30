@@ -65,6 +65,17 @@ class Goals:
 
 
 @dataclass
+class PitchConfig:
+    """Court size and pixel/metre point pairs [x_px, y_px, x_m, y_m] for the homography (see court.Pitch).
+
+    x_m runs from the left goal line (0) to the right one, y_m from the far touchline (0) to the near one.
+    """
+    length_m: float
+    width_m: float
+    points: list[tuple[float, float, float, float]]
+
+
+@dataclass
 class ArbiterConfig:
     """A vision-language model settles tracks the colour rules can't (see arbiter.py)."""
     enabled: bool = False
@@ -93,6 +104,7 @@ class Config:
     analysis: AnalysisConfig = field(default_factory=AnalysisConfig)
     arbiter: ArbiterConfig = field(default_factory=ArbiterConfig)
     goals: Goals | None = None
+    pitch: PitchConfig | None = None
 
     def kit(self, name: str | None) -> Kit | None:
         return next((k for k in self.kits if k.name == name), None)
@@ -121,7 +133,8 @@ def load(path: Path) -> Config:
                           "detector": _build(DetectorConfig, data.get("detector")),
                           "analysis": _build(AnalysisConfig, data.get("analysis")),
                           "arbiter": _build(ArbiterConfig, data.get("arbiter")),
-                          "goals": _build(Goals, data["goals"]) if data.get("goals") else None})
+                          "goals": _build(Goals, data["goals"]) if data.get("goals") else None,
+                          "pitch": _build(PitchConfig, data["pitch"]) if data.get("pitch") else None})
     cfg.video = Path(cfg.video)
     cfg.output_root = Path(cfg.output_root)
     if cfg.court is not None:

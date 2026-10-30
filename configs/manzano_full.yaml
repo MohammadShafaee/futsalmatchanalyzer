@@ -28,6 +28,24 @@ court: [[0, 570], [465, 368], [640, 371], [960, 369], [1280, 372], [1455, 370], 
 # Goal lines (through the bottoms of the posts) and the halfway line, for the coach report.
 goals: {left: [[274, 449], [334, 424]], right: [[1594, 436], [1656, 465]], halfway_x: 965}
 
+# Court in metres (homography). Several sports are painted on this floor; the futsal court is the
+# outer one: goal posts 3 m apart at the hall ends, halfway line vertical at x~963 (blue near side),
+# near touchline the blue line at y~585, far touchline at the edge of the court above. A 40 x 21 m
+# court fits these within ~15 px (under a metre); the basketball baselines 6 m inside each goal
+# line confirm the length.
+pitch:
+  length_m: 40
+  width_m: 21
+  points:                       # [x_px, y_px, x_m, y_m]: x from the left goal line, y from the far touchline
+    - [463.6, 370, 0, 0]        # far-left corner (left goal line meets the far touchline)
+    - [1452.9, 370, 40, 0]      # far-right corner
+    - [963, 370, 20, 0]         # halfway line, far end
+    - [963, 585, 20, 21]        # halfway line, near end
+    - [274, 449, 0, 12]         # left goal, near post
+    - [334, 424, 0, 9]          # left goal, far post
+    - [1594, 436, 40, 9]        # right goal, far post
+    - [1656, 465, 40, 12]       # right goal, near post
+
 # Used to score accuracy: how many people of each kit should be visible at any time.
 expected_on_court: {Manzano: 4, Jesolo: 4, GK Manzano: 1, GK Jesolo: 1, Referee: 2}
 # The video is edited: half-time is only the empty court at 36:05-37:05, and the teams leave the

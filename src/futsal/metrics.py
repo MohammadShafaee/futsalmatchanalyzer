@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from .ball import BallPoint
 from .config import AnalysisConfig, Config
+from .court import Pitch
 from .detect import Detection
 from .tracks import Track
 
@@ -62,6 +63,24 @@ def possession(frames: list[int], ball: dict[int, BallPoint], tracks: dict[int, 
     return states
 
 
+MAX_RUN_SPEED_M_S = 10.0   # faster steps are tracker jumps between people, not running
+
+
+def running_m(detections: list[Detection], pitch: Pitch, stride: int, fps: float) -> float:
+    """Metres covered between consecutive detections, skipping gaps and physically impossible steps."""
+    if len(detections) < 2:
+        return 0.0
+    m = pitch.to_m([d.foot for d in detections])
+    total = 0.0
+    for i, (a, b) in enumerate(zip(detections, detections[1:])):
+        if b.frame - a.frame > 2 * stride:
+            continue
+        step = float(math.hypot(*(m[i + 1] - m[i])))
+        if step <= MAX_RUN_SPEED_M_S * (b.frame - a.frame) / fps:
+            total += step
+    return total
+
+
 def summarize(cfg: Config, fps: float, stride: int, frames: list[int], tracks: dict[int, Track],
               raw_track_count: int, states: list[FrameState]) -> dict:
     step = stride / fps
@@ -80,18 +99,22 @@ def summarize(cfg: Config, fps: float, stride: int, frames: list[int], tracks: d
             touches[s.controller] += 1
         previous = s.controller
 
+    pitch = Pitch(cfg.pitch.length_m, cfg.pitch.width_m, cfg.pitch.points) if cfg.pitch else None
     players = []
     for t in tracks.values():
         dist = 0.0
         for a, b in zip(t.detections, t.detections[1:]):
             if b.frame - a.frame <= 2 * stride:   # skip jumps across gaps
                 dist += math.hypot(b.foot[0] - a.foot[0], b.foot[1] - a.foot[1])
-        players.append({"track_id": t.id, "kit": t.kit.name if t.kit else None,
-                        "team": t.kit.team if t.kit else None, "role": t.kit.role if t.kit else None,
-                        "first_seen_s": round(t.start / fps, 2), "last_seen_s": round(t.end / fps, 2),
-                        "observed_seconds": round(len(t.detections) * step, 2),
-                        "distance_px": round(dist, 1), "ball_touches": touches[t.id],
-                        "merged_from": t.merged_ids})
+        row = {"track_id": t.id, "kit": t.kit.name if t.kit else None,
+               "team": t.kit.team if t.kit else None, "role": t.kit.role if t.kit else None,
+               "first_seen_s": round(t.start / fps, 2), "last_seen_s": round(t.end / fps, 2),
+               "observed_seconds": round(len(t.detections) * step, 2),
+               "distance_px": round(dist, 1), "ball_touches": touches[t.id],
+               "merged_from": t.merged_ids}
+        if pitch is not None:
+            row["distance_m"] = round(running_m(t.detections, pitch, stride, fps), 1)
+        players.append(row)
     players.sort(key=lambda p: (p["team"] or "~", -p["observed_seconds"]))
 
     per_frame = defaultdict(Counter)
@@ -125,5 +148,6 @@ def summarize(cfg: Config, fps: float, stride: int, frames: list[int], tracks: d
         quality["expected_count_match_percent"] = {**exact, "all": round(100 * all_ok / m, 1)}
     return {"teams": teams, "quality": quality, "players": players, "limitations": [
         "Possession uses proximity to the ball, not verified contact.",
-        "Distances are in image pixels; court calibration is needed for metres.",
+        "Distances in metres come from the court homography and are accurate to about a metre." if pitch else
+        "Distances are in image pixels; court calibration (pitch in the config) is needed for metres.",
         "Passes, shots, goals and fouls are not classified yet."]}

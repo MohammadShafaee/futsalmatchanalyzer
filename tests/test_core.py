@@ -5,7 +5,7 @@ import pytest
 
 from futsal import arbiter, ball, config, kits, metrics, tracks
 from futsal.config import AnalysisConfig, ArbiterConfig, Kit
-from futsal.court import Court
+from futsal.court import Court, Pitch
 from futsal.detect import Detection, class_kinds
 from futsal.kits import KitClassifier
 
@@ -56,6 +56,23 @@ def test_court_contains():
     court = Court([(0, 0), (100, 0), (100, 100), (0, 100)])
     assert court.contains((50, 50)) and not court.contains((150, 50))
     assert Court(None).contains((1e6, 1e6))
+
+
+def test_pitch_maps_pixels_to_metres_and_running_skips_jumps():
+    # a 400 x 200 px picture of a 40 x 20 m court seen straight from above: 10 px per metre
+    pitch = Pitch(40, 20, [(0, 0, 0, 0), (400, 0, 40, 0), (400, 200, 40, 20), (0, 200, 0, 20)])
+    assert pitch.to_m([(200, 100)])[0] == pytest.approx([20, 10], abs=1e-3)
+    assert pitch.along(100, 50) == pytest.approx(.25) and pitch.along(-50, 0) == 0
+    # 2 m every 2 frames at 30 fps (30 m/s) is a jump between people, 0.1 m is running
+    dets = [person(0, 0, 100, 1), person(2, 1, 100, 1), person(4, 21, 100, 1), person(6, 22, 100, 1)]
+    assert metrics.running_m(dets, pitch, 2, FPS) == pytest.approx(0.2, abs=1e-3)
+
+
+def test_full_match_config_pitch_fits():
+    cfg = config.load("configs/manzano_full.yaml")
+    pitch = Pitch(cfg.pitch.length_m, cfg.pitch.width_m, cfg.pitch.points)
+    assert pitch.residual_px < 20
+    assert pitch.to_m([(963, 470)])[0][0] == pytest.approx(20, abs=.5)   # the halfway line
 
 
 @pytest.mark.parametrize("kit", [BLUE, GREEN, PINK])

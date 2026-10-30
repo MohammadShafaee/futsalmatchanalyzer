@@ -2,6 +2,8 @@
 
 Everything is aggregated so a full match fits the dashboard's file limits:
 - heat.json      time spent per 16x16 px cell of the cropped picture, per team / ball / long player track and half
+- pitch_heat.json  (with a pitch in the config) the same per 1 m cell of the court seen from above
+- running.json   (with a pitch) metres per player-minute of each team's outfield players, per five minutes of play
 - timeline.json  possession and team positions in short windows
 - zones.json     time the ball spent in each third, per half
 - players.json   tracks seen on court long enough to matter
@@ -25,6 +27,8 @@ import numpy as np
 
 from . import arbiter, video
 from .config import Config
+from .court import Pitch
+from .metrics import MAX_RUN_SPEED_M_S
 
 CELL = 16
 
@@ -47,13 +51,13 @@ def along(cfg: Config, x: float, y: float) -> float:
     return float(min(1.0, max(0.0, u)))
 
 
-def _halftime(cfg: Config, dets: list[dict], team: str) -> tuple[float | None, bool]:
+def _halftime(cfg: Config, dets: list[dict], team: str, u_of) -> tuple[float | None, bool]:
     """Second at which the team's goalkeeper changes ends, and whether it starts in the left goal."""
     gk = next((k.name for k in cfg.kits if k.team == team and k.role == "goalkeeper"), None)
     by_min = defaultdict(list)
     for d in dets:
         if d["kit"] == gk:
-            by_min[int(float(d["timestamp_s"]) // 60)].append(along(cfg, float(d["foot_x"]), float(d["foot_y"])))
+            by_min[int(float(d["timestamp_s"]) // 60)].append(u_of(float(d["foot_x"]), float(d["foot_y"])))
     sides = {m: statistics.median(v) < 0.5 for m, v in sorted(by_min.items()) if len(v) >= 10}
     if not sides:
         return None, True
@@ -67,8 +71,10 @@ def _halftime(cfg: Config, dets: list[dict], team: str) -> tuple[float | None, b
 
 
 def export(cfg: Config, run_dir: Path, out: Path) -> dict:
-    if cfg.goals is None:
-        raise ValueError("The config needs a 'goals' section for the coach report")
+    if cfg.goals is None and cfg.pitch is None:
+        raise ValueError("The config needs a 'pitch' or 'goals' section for the coach report")
+    pitch = Pitch(cfg.pitch.length_m, cfg.pitch.width_m, cfg.pitch.points) if cfg.pitch else None
+    u_of = pitch.along if pitch else (lambda x, y: along(cfg, x, y))
     out.mkdir(parents=True, exist_ok=True)
     summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
     meta = summary["video"]
@@ -78,7 +84,7 @@ def export(cfg: Config, run_dir: Path, out: Path) -> dict:
     dets, frames = _rows(run_dir / "detections.csv"), _rows(run_dir / "frames.csv")
     duration = meta["duration_s"]
 
-    halftime, home_left = _halftime(cfg, dets, home)
+    halftime, home_left = _halftime(cfg, dets, home, u_of)
     if cfg.in_play and len(cfg.in_play) >= 2:
         halftime = cfg.in_play[1][0]  # the configured periods beat the goalkeeper guess
     half_of = (lambda t: 1) if halftime is None else (lambda t: 1 if t < halftime else 2)
@@ -101,31 +107,71 @@ def export(cfg: Config, run_dir: Path, out: Path) -> dict:
             ranked[p["team"]].append(p["track_id"])
     heat_tracks = {tid for team in ranked.values() for tid in sorted(team, key=lambda t: -on_court[t])[:8]}
 
-    cells = defaultdict(float)
+    people = [d for d in dets if d["team"] and d["role"] in ("player", "goalkeeper")]
+    people_m = pitch.to_m([(float(d["foot_x"]), float(d["foot_y"])) for d in people]) if pitch and people else None
+    balls = [f for f in frames if f["ball_x"]]
+    balls_m = pitch.to_m([(float(f["ball_x"]), float(f["ball_y"])) for f in balls]) if pitch and balls else None
+    u_m = lambda xm: float(min(1.0, max(0.0, xm / pitch.length)))
+
+    cells, pitch_cells = defaultdict(float), defaultdict(float)
+
+    def add_pitch_cell(layer: str, t: float, m) -> None:
+        # 1 m cells on the court seen from above, a metre of slack round the lines for feet on them
+        if -1 <= m[0] <= pitch.length + 1 and -1 <= m[1] <= pitch.width + 1:
+            gx, gy = min(int(max(m[0], 0)), int(pitch.length) - 1), min(int(max(m[1], 0)), int(pitch.width) - 1)
+            pitch_cells[(layer, half_of(t), gx, gy)] += step
+
     per_frame_u = defaultdict(list)
-    for d in dets:
-        if not d["team"] or d["role"] not in ("player", "goalkeeper"):
-            continue
+    tracks_m = defaultdict(list)
+    for i, d in enumerate(people):
         t, x, y = float(d["timestamp_s"]), float(d["foot_x"]), min(float(d["foot_y"]), bottom - 1)
         cell = (int(x // CELL), int((y - top) // CELL))
         if d["role"] == "player":
             cells[(d["team"], half_of(t), *cell)] += step
-            per_frame_u[(d["frame"], d["team"])].append(home_view(along(cfg, x, y), t))
+            if pitch:
+                add_pitch_cell(d["team"], t, people_m[i])
+                tracks_m[int(d["track_id"])].append((int(d["frame"]), t, d["team"], people_m[i]))
+            per_frame_u[(d["frame"], d["team"])].append(home_view(u_m(people_m[i][0]) if pitch else u_of(x, y), t))
         tid = int(d["track_id"])
         if tid in heat_tracks:
             cells[(f"#{tid}", half_of(t), *cell)] += step
 
+    ball_u = {}
+    for i, f in enumerate(balls):
+        t, bx, by = float(f["timestamp_s"]), float(f["ball_x"]), float(f["ball_y"])
+        cells[("Ball", half_of(t), int(bx // CELL), int((min(by, bottom - 1) - top) // CELL))] += step
+        if pitch:
+            add_pitch_cell("Ball", t, balls_m[i])
+        ball_u[f["frame"]] = home_view(u_m(balls_m[i][0]) if pitch else u_of(bx, by), t)
+
     timeline_src, zones = [], defaultdict(float)
     for f in frames:
         t = float(f["timestamp_s"])
-        bu = None
-        if f["ball_x"]:
-            bx, by = float(f["ball_x"]), float(f["ball_y"])
-            cells[("Ball", half_of(t), int(bx // CELL), int((min(by, bottom - 1) - top) // CELL))] += step
-            bu = home_view(along(cfg, bx, by), t)
-            if live(t):
-                zones[(half_of(t), "own" if bu < 1 / 3 else "middle" if bu < 2 / 3 else "attack")] += step
+        bu = ball_u.get(f["frame"])
+        if bu is not None and live(t):
+            zones[(half_of(t), "own" if bu < 1 / 3 else "middle" if bu < 2 / 3 else "attack")] += step
         timeline_src.append((t, f["possession_team"], bu, f["frame"]))
+
+    # ---- running: metres per player-minute of each team's outfield players, per five minutes of play ----
+    running_rows = []
+    if pitch:
+        stride = meta["stride"]
+        metres, seen = defaultdict(float), defaultdict(float)
+        for points in tracks_m.values():
+            points.sort(key=lambda p: p[0])
+            for (fa, ta, team, ma), (fb, tb, _, mb) in zip(points, points[1:]):
+                if not live(ta):
+                    continue
+                key = (int(ta // 300) * 5, team)
+                seen[key] += step
+                if fb - fa <= 2 * stride:
+                    d = float(np.hypot(*(mb - ma)))
+                    if d <= MAX_RUN_SPEED_M_S * (tb - ta):
+                        metres[key] += d
+        running_rows = [{"block_start_min": b, "half": half_of(b * 60.0 + 1), "team": team,
+                         "metres": round(metres[(b, team)], 1), "player_minutes": round(seen[(b, team)] / 60, 2),
+                         "m_per_min": round(metres[(b, team)] / (seen[(b, team)] / 60), 1) if seen[(b, team)] >= 30 else None}
+                        for b, team in sorted(seen)]
 
     heat = [{"layer": layer, "half": half, "x": (gx + .5) * CELL, "y": (gy + .5) * CELL, "s": round(s, 2)}
             for (layer, half, gx, gy), s in cells.items()]
@@ -180,6 +226,12 @@ def export(cfg: Config, run_dir: Path, out: Path) -> dict:
               "ai_swaps": sum(a.get("label") == arbiter.MIXED for a in answers.values())}]
 
     files = {"heat": heat, "timeline": timeline, "zones": zone_rows, "players": players, "match": match}
+    if pitch:
+        match[0] |= {"pitch_length_m": pitch.length, "pitch_width_m": pitch.width,
+                     "pitch_fit_px": round(pitch.residual_px, 1)}
+        files["pitch_heat"] = [{"layer": layer, "half": half, "x_m": gx + .5, "y_m": gy + .5, "s": round(s, 2)}
+                               for (layer, half, gx, gy), s in pitch_cells.items()]
+        files["running"] = running_rows
     for name, data in files.items():
         (out / f"{name}.json").write_text(json.dumps(data, separators=(",", ":")), encoding="utf-8")
 
