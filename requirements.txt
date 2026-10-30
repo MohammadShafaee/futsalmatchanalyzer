@@ -2,3 +2,8 @@ ultralytics>=8.3
 opencv-python>=4.9
 numpy>=1.26
 pyyaml>=6
+# jersey numbers (python -m futsal jerseys): PARSeq via torch.hub needs these next to torch.
+# On a CUDA build of torch install them with --no-deps so pip doesn't replace torch.
+timm>=1.0
+pytorch-lightning>=2.0
+nltk>=3.8
