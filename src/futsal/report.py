@@ -4,6 +4,10 @@ Everything is aggregated so a full match fits the dashboard's file limits:
 - heat.json      time spent per 16x16 px cell of the cropped picture, per team / ball / long player track and half
 - pitch_heat.json  (with a pitch in the config) the same per 1 m cell of the court seen from above
 - running.json   (with a pitch) metres per player-minute of each team's outfield players, per five minutes of play
+- shape.json     (with a pitch) each team's outfield block per minute of play: centre, width, depth, line height, area
+- replay.csv     (with a pitch) everyone on court and the ball in metres, every third analysed frame during play;
+                 kind H/A = home/away outfield player, h/a = their goalkeeper, R = referee, B = ball
+- pitch_heat rows carry a phase: with / without the ball (team in possession), none (nobody has it), all (ball layer)
 - timeline.json  possession and team positions in short windows
 - zones.json     time the ball spent in each third, per half
 - players.json   tracks seen on court long enough to matter
@@ -115,22 +119,28 @@ def export(cfg: Config, run_dir: Path, out: Path) -> dict:
 
     cells, pitch_cells = defaultdict(float), defaultdict(float)
 
-    def add_pitch_cell(layer: str, t: float, m) -> None:
+    def add_pitch_cell(layer: str, t: float, m, phase: str = "all") -> None:
         # 1 m cells on the court seen from above, a metre of slack round the lines for feet on them
         if -1 <= m[0] <= pitch.length + 1 and -1 <= m[1] <= pitch.width + 1:
             gx, gy = min(int(max(m[0], 0)), int(pitch.length) - 1), min(int(max(m[1], 0)), int(pitch.width) - 1)
-            pitch_cells[(layer, half_of(t), gx, gy)] += step
+            pitch_cells[(layer, half_of(t), phase, gx, gy)] += step
 
+    poss_of = {f["frame"]: f["possession_team"] for f in frames}
     per_frame_u = defaultdict(list)
     tracks_m = defaultdict(list)
+    shape_pts = defaultdict(list)   # (frame, team) -> outfield positions in metres, during play
     for i, d in enumerate(people):
         t, x, y = float(d["timestamp_s"]), float(d["foot_x"]), min(float(d["foot_y"]), bottom - 1)
         cell = (int(x // CELL), int((y - top) // CELL))
         if d["role"] == "player":
             cells[(d["team"], half_of(t), *cell)] += step
             if pitch:
-                add_pitch_cell(d["team"], t, people_m[i])
+                holder = poss_of.get(d["frame"])
+                phase = "none" if not holder else "with" if holder == d["team"] else "without"
+                add_pitch_cell(d["team"], t, people_m[i], phase)
                 tracks_m[int(d["track_id"])].append((int(d["frame"]), t, d["team"], people_m[i]))
+                if live(t):
+                    shape_pts[(d["frame"], d["team"])].append(people_m[i])
             per_frame_u[(d["frame"], d["team"])].append(home_view(u_m(people_m[i][0]) if pitch else u_of(x, y), t))
         tid = int(d["track_id"])
         if tid in heat_tracks:
@@ -172,6 +182,49 @@ def export(cfg: Config, run_dir: Path, out: Path) -> dict:
                          "metres": round(metres[(b, team)], 1), "player_minutes": round(seen[(b, team)] / 60, 2),
                          "m_per_min": round(metres[(b, team)] / (seen[(b, team)] / 60), 1) if seen[(b, team)] >= 30 else None}
                         for b, team in sorted(seen)]
+
+    # ---- team shape per minute of play, seen with Manzano attacking left to right ----
+    shape_rows = []
+    if pitch:
+        L, Wd = pitch.length, pitch.width
+        per_min = defaultdict(lambda: defaultdict(list))
+        for (frame, team), pts in shape_pts.items():
+            if len(pts) < 3:
+                continue
+            t = int(frame) / meta["fps"]
+            p = np.asarray(pts, dtype=np.float32)
+            if not (home_left if half_of(t) == 1 else not home_left):
+                p = np.c_[L - p[:, 0], Wd - p[:, 1]]   # turn the court round so Manzano's goal is on the left
+            # line height: the deepest outfield player's distance from his own goal line
+            line = float(p[:, 0].min()) if team == home else float(L - p[:, 0].max())
+            area = float(cv2.contourArea(cv2.convexHull(p)))
+            m = per_min[(int(t // 60), team)]
+            for k, v in (("cx", p[:, 0].mean()), ("cy", p[:, 1].mean()), ("width", np.ptp(p[:, 1])),
+                         ("depth", np.ptp(p[:, 0])), ("line", line), ("area", area)):
+                m[k].append(float(v))
+        shape_rows = [{"min": mi, "half": half_of(mi * 60.0 + 30), "team": team,
+                       "centroid_x_m": round(np.mean(v["cx"]), 2), "centroid_y_m": round(np.mean(v["cy"]), 2),
+                       "width_m": round(np.mean(v["width"]), 2), "depth_m": round(np.mean(v["depth"]), 2),
+                       "line_height_m": round(np.mean(v["line"]), 2), "area_m2": round(np.mean(v["area"]), 1),
+                       "frames": len(v["cx"])}
+                      for (mi, team), v in sorted(per_min.items()) if len(v["cx"]) >= 20]
+
+    # ---- 2D replay: everyone on court and the ball, ~2.5 times a second during play, in metres ----
+    replay_lines = []
+    if pitch:
+        every = 3 * meta["stride"]
+        # kind: H/A = home/away outfield player, h/a = their goalkeeper, R = referee, B = ball
+        side = {home: "H", away: "A"}
+        code = {k.name: "R" if k.role == "referee" else side.get(k.team, "?") if k.role == "player"
+                else side.get(k.team, "?").lower() for k in cfg.kits}
+        sample = [d for d in dets if d["kit"] and int(d["frame"]) % every == 0 and live(float(d["timestamp_s"]))]
+        if sample:
+            sm = pitch.to_m([(float(d["foot_x"]), float(d["foot_y"])) for d in sample])
+            replay_lines += [f'{float(d["timestamp_s"]):.1f},{code.get(d["kit"], "?")},{m[0]:.1f},{m[1]:.1f}'
+                             for d, m in zip(sample, sm) if -2 <= m[0] <= pitch.length + 2 and -2 <= m[1] <= pitch.width + 2]
+        bs = [(i, f) for i, f in enumerate(balls) if int(f["frame"]) % every == 0 and live(float(f["timestamp_s"]))]
+        replay_lines += [f'{float(f["timestamp_s"]):.1f},B,{balls_m[i][0]:.1f},{balls_m[i][1]:.1f}' for i, f in bs]
+        replay_lines.sort(key=lambda s: float(s.split(",", 1)[0]))
 
     heat = [{"layer": layer, "half": half, "x": (gx + .5) * CELL, "y": (gy + .5) * CELL, "s": round(s, 2)}
             for (layer, half, gx, gy), s in cells.items()]
@@ -229,9 +282,11 @@ def export(cfg: Config, run_dir: Path, out: Path) -> dict:
     if pitch:
         match[0] |= {"pitch_length_m": pitch.length, "pitch_width_m": pitch.width,
                      "pitch_fit_px": round(pitch.residual_px, 1)}
-        files["pitch_heat"] = [{"layer": layer, "half": half, "x_m": gx + .5, "y_m": gy + .5, "s": round(s, 2)}
-                               for (layer, half, gx, gy), s in pitch_cells.items()]
+        files["pitch_heat"] = [{"layer": layer, "half": half, "phase": phase, "x_m": gx + .5, "y_m": gy + .5, "s": round(s, 2)}
+                               for (layer, half, phase, gx, gy), s in pitch_cells.items()]
         files["running"] = running_rows
+        files["shape"] = shape_rows
+        (out / "replay.csv").write_text("t,k,x,y\n" + "\n".join(replay_lines) + "\n", encoding="utf-8")
     for name, data in files.items():
         (out / f"{name}.json").write_text(json.dumps(data, separators=(",", ":")), encoding="utf-8")
 
