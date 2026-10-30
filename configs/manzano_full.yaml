@@ -6,7 +6,7 @@ output_root: outputs
 teams: [Manzano, Jesolo]
 
 # Reference shirt colours (RGB) sampled from the match (k-means over on-court torsos).
-# Blue = Manzano and red = Jesolo (confirmed by the user); goalkeeper teams still to confirm.
+# Blue = Manzano, red = Jesolo, white GK = Manzano, green GK = Jesolo (all confirmed by the user).
 kits:
   - {name: Manzano, team: Manzano, role: player, rgb: [55, 70, 130]}          # blue
   - {name: Jesolo, team: Jesolo, role: player, rgb: [150, 50, 65]}            # red
