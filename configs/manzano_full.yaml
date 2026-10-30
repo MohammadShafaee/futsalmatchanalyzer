@@ -35,6 +35,13 @@ detector:
   imgsz: 2560
   stride: 4                       # 7.5 analysed frames per second: ~38,000 frames, ~4-4.5 h
 
+# Gemini settles the hard cases (unclear shirt colour, people at the bench line, swapped IDs).
+# Needs GEMINI_API_KEY. On the free tier only ~20 questions per model per day are allowed: the
+# longest tracks are asked first and answers are cached, so re-running `analyze` continues the next day.
+arbiter:
+  enabled: true
+  model: gemini-3.5-flash
+
 analysis:
   split_on_kit_change: true
   possession_radius_px: 45
