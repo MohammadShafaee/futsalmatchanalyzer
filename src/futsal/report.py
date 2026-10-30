@@ -7,6 +7,8 @@ Everything is aggregated so a full match fits the dashboard's file limits:
 - shape.json     (with a pitch) each team's outfield block per minute of play: centre, width, depth, line height, area
 - replay.csv     (with a pitch) everyone on court and the ball in metres, every third analysed frame during play;
                  kind H/A = home/away outfield player, h/a = their goalkeeper, R = referee, B = ball
+- numbered.json  (after `futsal jerseys`) one row per shirt number: tracks, time on court, metres, touches;
+                 numbered players also get their own pitch_heat layer ("Manzano 10") and their number in replay.csv
 - pitch_heat rows carry a phase: with / without the ball (team in possession), none (nobody has it), all (ball layer)
 - timeline.json  possession and team positions in short windows
 - zones.json     time the ball spent in each third, per half
@@ -29,7 +31,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from . import arbiter, video
+from . import arbiter, jersey, video
 from .config import Config
 from .court import Pitch
 from .metrics import MAX_RUN_SPEED_M_S
@@ -125,6 +127,11 @@ def export(cfg: Config, run_dir: Path, out: Path) -> dict:
             gx, gy = min(int(max(m[0], 0)), int(pitch.length) - 1), min(int(max(m[1], 0)), int(pitch.width) - 1)
             pitch_cells[(layer, half_of(t), phase, gx, gy)] += step
 
+    # shirt numbers read by `futsal jerseys`, if it has been run on these tracks
+    jersey_path = run_dir / jersey.RESULT
+    shirts = json.loads(jersey_path.read_text(encoding="utf-8")) if jersey_path.exists() else {}
+    shirt_of = {int(tid): (j["team"], int(j["number"])) for tid, j in shirts.items()}
+
     poss_of = {f["frame"]: f["possession_team"] for f in frames}
     per_frame_u = defaultdict(list)
     tracks_m = defaultdict(list)
@@ -138,6 +145,9 @@ def export(cfg: Config, run_dir: Path, out: Path) -> dict:
                 holder = poss_of.get(d["frame"])
                 phase = "none" if not holder else "with" if holder == d["team"] else "without"
                 add_pitch_cell(d["team"], t, people_m[i], phase)
+                if int(d["track_id"]) in shirt_of:
+                    team, number = shirt_of[int(d["track_id"])]
+                    add_pitch_cell(f"{team} {number}", t, people_m[i])
                 tracks_m[int(d["track_id"])].append((int(d["frame"]), t, d["team"], people_m[i]))
                 if live(t):
                     shape_pts[(d["frame"], d["team"])].append(people_m[i])
@@ -220,7 +230,9 @@ def export(cfg: Config, run_dir: Path, out: Path) -> dict:
         sample = [d for d in dets if d["kit"] and int(d["frame"]) % every == 0 and live(float(d["timestamp_s"]))]
         if sample:
             sm = pitch.to_m([(float(d["foot_x"]), float(d["foot_y"])) for d in sample])
-            replay_lines += [f'{float(d["timestamp_s"]):.1f},{code.get(d["kit"], "?")},{m[0]:.1f},{m[1]:.1f}'
+            # a numbered player's kind carries the shirt: H10 = home outfield player number 10
+            number = lambda d: str(shirt_of[int(d["track_id"])][1]) if int(d["track_id"]) in shirt_of else ""
+            replay_lines += [f'{float(d["timestamp_s"]):.1f},{code.get(d["kit"], "?")}{number(d)},{m[0]:.1f},{m[1]:.1f}'
                              for d, m in zip(sample, sm) if -2 <= m[0] <= pitch.length + 2 and -2 <= m[1] <= pitch.width + 2]
         bs = [(i, f) for i, f in enumerate(balls) if int(f["frame"]) % every == 0 and live(float(f["timestamp_s"]))]
         replay_lines += [f'{float(f["timestamp_s"]):.1f},B,{balls_m[i][0]:.1f},{balls_m[i][1]:.1f}' for i, f in bs]
@@ -264,6 +276,25 @@ def export(cfg: Config, run_dir: Path, out: Path) -> dict:
                       for p in summary["players"] if p["team"] and on_court[p["track_id"]] >= min(20.0, min_track)),
                      key=lambda r: (r["team"], -r["on_court_s"]))
 
+    # ---- players by shirt number: all tracks that carried the same number, put together ----
+    numbered = []
+    if shirt_of:
+        by_tid = {p["track_id"]: p for p in summary["players"]}
+        groups = defaultdict(list)
+        for tid, shirt in shirt_of.items():
+            groups[shirt].append(tid)
+        for (team, number), tids in sorted(groups.items()):
+            ps = [by_tid[t] for t in tids if t in by_tid]
+            if not ps:
+                continue
+            numbered.append({"team": team, "number": number, "role": Counter(p["role"] for p in ps).most_common(1)[0][0],
+                             "tracks": len(ps), "on_court_s": round(sum(on_court[t] for t in tids), 1),
+                             "distance_m": round(sum(p.get("distance_m") or 0 for p in ps), 1),
+                             "ball_touches": sum(p["ball_touches"] for p in ps),
+                             "first_min": round(min(p["first_seen_s"] for p in ps) / 60, 1),
+                             "last_min": round(max(p["last_seen_s"] for p in ps) / 60, 1),
+                             "reads": sum(shirts[str(t)]["reads"] for t in tids)})
+
     q = summary["quality"]
     cache = run_dir / arbiter.CACHE
     answers = json.loads(cache.read_text(encoding="utf-8")) if cache.exists() else {}
@@ -279,6 +310,8 @@ def export(cfg: Config, run_dir: Path, out: Path) -> dict:
               "ai_swaps": sum(a.get("label") == arbiter.MIXED for a in answers.values())}]
 
     files = {"heat": heat, "timeline": timeline, "zones": zone_rows, "players": players, "match": match}
+    if numbered:
+        files["numbered"] = numbered
     if pitch:
         match[0] |= {"pitch_length_m": pitch.length, "pitch_width_m": pitch.width,
                      "pitch_fit_px": round(pitch.residual_px, 1)}

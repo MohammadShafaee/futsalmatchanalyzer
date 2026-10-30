@@ -46,6 +46,15 @@ pitch:
     - [1594, 436, 40, 9]        # right goal, far post
     - [1656, 465, 40, 12]       # right goal, near post
 
+# Jersey numbers (python -m futsal jerseys). Without a roster PARSeq also "reads" the thin white stripes
+# of the red shirts as 1 and the substitutes' training bibs as numbers. These are the numbers checked by
+# eye on sampled crops (2026-10-30); replace with the real team sheets. The Jesolo outfield numbers
+# (dark red on red) are rarely legible from this camera, so few Jesolo players get a number.
+jersey:
+  roster:
+    Manzano: [2, 5, 7, 8, 9, 10, 14, 20, 21, 37]     # 14 = goalkeeper (white)
+    Jesolo: [10, 13, 20]                              # 20 = goalkeeper (green)
+
 # Used to score accuracy: how many people of each kit should be visible at any time.
 expected_on_court: {Manzano: 4, Jesolo: 4, GK Manzano: 1, GK Jesolo: 1, Referee: 2}
 # The video is edited: half-time is only the empty court at 36:05-37:05, and the teams leave the

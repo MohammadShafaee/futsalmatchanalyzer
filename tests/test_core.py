@@ -68,6 +68,29 @@ def test_pitch_maps_pixels_to_metres_and_running_skips_jumps():
     assert metrics.running_m(dets, pitch, 2, FPS) == pytest.approx(0.2, abs=1e-3)
 
 
+def _jersey_row(tid, frame, team="A", h=80):
+    return {"track_id": str(tid), "frame": str(frame), "team": team, "role": "player", "source": "detected",
+            "x1": "100", "y1": "300", "x2": "130", "y2": str(300 + h)}
+
+
+def test_jersey_vote_needs_confident_digits_and_one_shirt_at_a_time():
+    from futsal import jersey
+    from futsal.config import JerseyConfig
+    rows = [_jersey_row(1, f) for f in range(0, 40, 4)] + [_jersey_row(2, f) for f in range(20, 60, 4)] \
+        + [_jersey_row(3, f) for f in range(100, 140, 4)]
+    reads = {}
+    for i, r in enumerate(rows):
+        k = jersey._key(r["frame"], r["x1"], r["y1"], r["x2"], r["y2"])
+        tid = r["track_id"]
+        # track 1 reads "10" well; track 2 overlaps it in time and reads "10" weakly; track 3 reads letters
+        reads[k] = ("10", .95) if tid == "1" and i % 2 == 0 else ("10", .7) if tid == "2" and i % 5 == 0 else ("X", .9)
+    out = jersey.vote(rows, reads, JerseyConfig())
+    assert out["1"]["number"] == 10 and "2" not in out and "3" not in out
+    assert jersey.candidates(rows + [_jersey_row(4, 0, h=40)], JerseyConfig(max_reads_per_track=3))[-1]["track_id"] == "3"
+    assert jersey.is_number("7") and not jersey.is_number("123") and not jersey.is_number("1O")
+    assert jersey.vote(rows, reads, JerseyConfig(roster={"A": [7, 11]})) == {}   # 10 isn't on the team sheet
+
+
 def test_full_match_config_pitch_fits():
     cfg = config.load("configs/manzano_full.yaml")
     pitch = Pitch(cfg.pitch.length_m, cfg.pitch.width_m, cfg.pitch.points)

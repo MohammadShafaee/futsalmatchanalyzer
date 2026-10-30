@@ -76,6 +76,20 @@ class PitchConfig:
 
 
 @dataclass
+class JerseyConfig:
+    """Jersey-number reading (see jersey.py)."""
+    min_height_px: float = 60.0     # smaller players are too far away for the number to be legible
+    max_reads_per_track: int = 40   # crops read per track, spread over its length
+    min_conf: float = 0.6           # PARSeq confidence (product over characters) to count a read
+    min_votes: float = 1.2          # summed confidence the winning number needs on one track
+    min_share: float = 0.6          # ...and its share of all confident reads on that track
+    # shirt numbers each team actually wears (the team sheet); reads of any other number are ignored.
+    # Empty: every one- or two-digit read counts (expect stripes and bibs to produce false numbers).
+    roster: dict[str, list[int]] = field(default_factory=dict)
+    device: str | None = None
+
+
+@dataclass
 class ArbiterConfig:
     """A vision-language model settles tracks the colour rules can't (see arbiter.py)."""
     enabled: bool = False
@@ -105,6 +119,7 @@ class Config:
     arbiter: ArbiterConfig = field(default_factory=ArbiterConfig)
     goals: Goals | None = None
     pitch: PitchConfig | None = None
+    jersey: JerseyConfig = field(default_factory=JerseyConfig)
 
     def kit(self, name: str | None) -> Kit | None:
         return next((k for k in self.kits if k.name == name), None)
@@ -134,7 +149,8 @@ def load(path: Path) -> Config:
                           "analysis": _build(AnalysisConfig, data.get("analysis")),
                           "arbiter": _build(ArbiterConfig, data.get("arbiter")),
                           "goals": _build(Goals, data["goals"]) if data.get("goals") else None,
-                          "pitch": _build(PitchConfig, data["pitch"]) if data.get("pitch") else None})
+                          "pitch": _build(PitchConfig, data["pitch"]) if data.get("pitch") else None,
+                          "jersey": _build(JerseyConfig, data.get("jersey"))})
     cfg.video = Path(cfg.video)
     cfg.output_root = Path(cfg.output_root)
     if cfg.court is not None:
