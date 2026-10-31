@@ -86,7 +86,16 @@ class JerseyConfig:
     # shirt numbers each team actually wears (the team sheet); reads of any other number are ignored.
     # Empty: every one- or two-digit read counts (expect stripes and bibs to produce false numbers).
     roster: dict[str, list[int]] = field(default_factory=dict)
+    # numbers PARSeq invents from the kit itself (thin stripes read as 1); only Jev may vote for them
+    parseq_ignore: list[int] = field(default_factory=list)
     device: str | None = None
+    # second reader: Jev (TypeSafe) looks at tracks PARSeq couldn't number (needs JEV_API_KEY, see jev.py)
+    jev: bool = False
+    jev_model: str = "jev-latest"
+    jev_reads_per_track: int = 3    # the tallest boxes of the track, at least jev_gap_s apart
+    jev_gap_s: float = 1.0
+    jev_min_conf: float = 0.6
+    jev_threads: int = 8
 
 
 @dataclass

@@ -91,6 +91,23 @@ def test_jersey_vote_needs_confident_digits_and_one_shirt_at_a_time():
     assert jersey.vote(rows, reads, JerseyConfig(roster={"A": [7, 11]})) == {}   # 10 isn't on the team sheet
 
 
+def test_jev_second_reader_joins_the_vote_and_images_fit_the_api():
+    from futsal import jersey, jev
+    from futsal.config import JerseyConfig
+    rows = [_jersey_row(1, f, h=60 + f) for f in range(0, 120, 4)]
+    cfg = JerseyConfig(jev_reads_per_track=3, jev_gap_s=1.0)
+    picked = jersey.jev_candidates(rows, cfg, skip=set(), fps=30)
+    frames = sorted(int(r["frame"]) for r in picked)
+    assert len(picked) == 3 and frames[-1] == 116 and all(b - a >= 30 for a, b in zip(frames, frames[1:]))
+    assert jersey.jev_candidates(rows, cfg, skip={"1"}, fps=30) == []
+    extra = {jersey._key(r["frame"], r["x1"], r["y1"], r["x2"], r["y2"]): ("8", .7) for r in picked}
+    assert jersey.vote(rows, {}, cfg, extra)["1"]["number"] == 8
+    assert jersey.vote(rows, {}, JerseyConfig(roster={"A": [10]}), extra) == {}
+    for shape in [(80, 30, 3), (2000, 400, 3)]:
+        h, w = jev.fit_image(np.zeros(shape, np.uint8)).shape[:2]
+        assert jev.MIN_SIDE <= min(h, w) and max(h, w) <= jev.MAX_SIDE
+
+
 def test_full_match_config_pitch_fits():
     cfg = config.load("configs/manzano_full.yaml")
     pitch = Pitch(cfg.pitch.length_m, cfg.pitch.width_m, cfg.pitch.points)

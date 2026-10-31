@@ -9,6 +9,9 @@ read nothing useful. The approach follows the SoccerNet jersey-number pipelines:
    enough votes and a clear majority;
 5. per team, a number can't be on court twice at once: overlapping tracks keep the better-supported one.
 
+With `jev` on, tracks PARSeq leaves unnumbered (above all the dark-red numbers it can't read) are shown
+to Jev (TypeSafe, see jev.py) a few times each, and its answers join the vote; cached in jersey_jev.csv.
+
 Reads are cached in jersey_reads.csv (keyed by frame and box), so re-analysing a run and voting again
 costs nothing; jerseys.json holds the result per stitched track.
 """
@@ -27,6 +30,7 @@ from .config import JerseyConfig
 
 LOG = logging.getLogger(__name__)
 READS = "jersey_reads.csv"
+JEV_READS = "jersey_jev.csv"
 RESULT = "jerseys.json"
 
 
@@ -125,8 +129,94 @@ def read_all(rows: list[dict], cfg: JerseyConfig, video_path: Path, run_dir: Pat
     return cache
 
 
-def vote(rows: list[dict], reads: dict[str, tuple[str, float]], cfg: JerseyConfig) -> dict[str, dict]:
-    """Number per track from its confident reads, then drop same-number tracks that overlap in time."""
+def jev_candidates(rows: list[dict], cfg: JerseyConfig, skip: set[str], fps: float) -> list[dict]:
+    """The tallest detected boxes of each track not in `skip`, at least cfg.jev_gap_s apart."""
+    by_track = defaultdict(list)
+    for r in rows:
+        if r["track_id"] not in skip and r["role"] in ("player", "goalkeeper") and r["source"] == "detected" \
+                and float(r["y2"]) - float(r["y1"]) >= cfg.min_height_px:
+            by_track[r["track_id"]].append(r)
+    picked = []
+    for rs in by_track.values():
+        chosen = []
+        for r in sorted(rs, key=lambda r: float(r["y1"]) - float(r["y2"])):
+            if all(abs(int(r["frame"]) - int(c["frame"])) >= cfg.jev_gap_s * fps for c in chosen):
+                chosen.append(r)
+            if len(chosen) == cfg.jev_reads_per_track:
+                break
+        picked += chosen
+    return picked
+
+
+JEV_QUESTION = ("This is a futsal player filmed from the stand. Which number is printed on the back "
+                "(or the front) of the shirt?")
+JEV_OPTIONS = {**{str(n): f"the shirt number is {n}" for n in range(1, 100)},
+               "none": "no number can be read: the player is turned sideways, the number is hidden or too blurry"}
+
+
+def read_jev(rows: list[dict], cfg: JerseyConfig, video_path: Path, run_dir: Path, skip: set[str],
+             fps: float) -> dict[str, tuple[str, float]]:
+    """Ask Jev for the number on tracks the first reader left unnumbered; cached in jersey_jev.csv."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from . import jev
+    path = run_dir / JEV_READS
+    cache = {}
+    if path.exists():
+        with path.open(newline="", encoding="utf-8") as f:
+            cache = {r["key"]: (r["label"], float(r["conf"])) for r in csv.DictReader(f)}
+    todo = [r for r in jev_candidates(rows, cfg, skip, fps) if _key(r["frame"], r["x1"], r["y1"], r["x2"], r["y2"]) not in cache]
+    LOG.info("Jerseys: %d crops to ask Jev about (%d cached)", len(todo), len(cache))
+    key = jev.api_key()
+    if todo and not key:
+        LOG.warning("Jerseys: JEV_API_KEY is not set (environment or .env); skipping Jev")
+        return cache
+    if not todo:
+        return cache
+    client = jev.Client(key, model=cfg.jev_model)
+    by_frame = defaultdict(list)
+    for r in todo:
+        by_frame[int(r["frame"])].append(r)
+    jobs = []
+    for index, frame in video.frames(video_path, wanted=set(by_frame)):
+        for r in by_frame[index]:
+            x1, y1, x2, y2 = (float(r[k]) for k in ("x1", "y1", "x2", "y2"))
+            h, w = y2 - y1, x2 - x1
+            crop = frame[max(0, int(y1 - .05 * h)):int(y2), max(0, int(x1 - .15 * w)):int(x2 + .15 * w)]
+            jobs.append((_key(r["frame"], r["x1"], r["y1"], r["x2"], r["y2"]), crop.copy()))
+
+    def ask(job):
+        k, crop = job
+        try:
+            choice, conf, _ = client.choice(JEV_QUESTION, JEV_OPTIONS, image=crop)
+            return k, choice, conf
+        except jev.JevError as e:
+            LOG.warning("Jerseys: Jev failed on %s: %s", k, e)
+            return k, None, 0.0
+
+    fresh = not path.exists()
+    with path.open("a", newline="", encoding="utf-8") as f, ThreadPoolExecutor(cfg.jev_threads) as pool:
+        w = csv.writer(f)
+        if fresh:
+            w.writerow(["key", "label", "conf"])
+        for n, (k, choice, conf) in enumerate(pool.map(ask, jobs), 1):
+            if choice is not None:
+                cache[k] = (choice, conf)
+                w.writerow([k, choice, round(conf, 4)])
+            if n % 500 == 0:
+                f.flush()
+                LOG.info("Jerseys: %d/%d asked (%d input tokens, about $%.2f)", n, len(jobs), client.input_tokens,
+                         client.input_tokens * 0.042 / 1e6)
+    LOG.info("Jerseys: Jev used %d input tokens (about $%.2f)", client.input_tokens, client.input_tokens * 0.042 / 1e6)
+    return cache
+
+
+def vote(rows: list[dict], reads: dict[str, tuple[str, float]], cfg: JerseyConfig,
+         extra: dict[str, tuple[str, float]] | None = None) -> dict[str, dict]:
+    """Number per track from its confident reads, then drop same-number tracks that overlap in time.
+
+    `extra` holds a second reader's reads (Jev), counted the same way with its own confidence bar.
+    """
     votes = defaultdict(lambda: defaultdict(float))
     counts = defaultdict(lambda: defaultdict(int))
     span, team_of = {}, {}
@@ -136,11 +226,14 @@ def vote(rows: list[dict], reads: dict[str, tuple[str, float]], cfg: JerseyConfi
         lo, hi = span.get(tid, (f, f))
         span[tid] = (min(lo, f), max(hi, f))
         team_of[tid] = r["team"]
-        got = reads.get(_key(r["frame"], r["x1"], r["y1"], r["x2"], r["y2"]))
+        k = _key(r["frame"], r["x1"], r["y1"], r["x2"], r["y2"])
         allowed = cfg.roster.get(r["team"]) if cfg.roster else None
-        if got and is_number(got[0]) and got[1] >= cfg.min_conf and (allowed is None or int(got[0]) in allowed):
-            votes[tid][got[0]] += got[1]
-            counts[tid][got[0]] += 1
+        for got, bar, ignored in ((reads.get(k), cfg.min_conf, cfg.parseq_ignore),
+                                  ((extra or {}).get(k), cfg.jev_min_conf, ())):
+            if got and is_number(got[0]) and got[1] >= bar and int(got[0]) not in ignored \
+                    and (allowed is None or int(got[0]) in allowed):
+                votes[tid][got[0]] += got[1]
+                counts[tid][got[0]] += 1
     result = {}
     for tid, v in votes.items():
         number, best = max(v.items(), key=lambda kv: kv[1])
@@ -175,5 +268,8 @@ def run(cfg: JerseyConfig, run_dir: Path) -> dict[str, dict]:
     meta = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))["video"]
     reads = read_all(rows, cfg, Path(meta["path"]), run_dir)
     result = vote(rows, reads, cfg)
+    if cfg.jev:
+        extra = read_jev(rows, cfg, Path(meta["path"]), run_dir, set(result), meta["fps"])
+        result = vote(rows, reads, cfg, extra)
     (run_dir / RESULT).write_text(json.dumps(result, indent=1), encoding="utf-8")
     return result
