@@ -287,7 +287,8 @@ def export(cfg: Config, run_dir: Path, out: Path) -> dict:
             ps = [by_tid[t] for t in tids if t in by_tid]
             if not ps:
                 continue
-            numbered.append({"team": team, "number": number, "role": Counter(p["role"] for p in ps).most_common(1)[0][0],
+            numbered.append({"team": team, "number": number, "name": cfg.player_name(team, number),
+                             "role": Counter(p["role"] for p in ps).most_common(1)[0][0],
                              "tracks": len(ps), "on_court_s": round(sum(on_court[t] for t in tids), 1),
                              "distance_m": round(sum(p.get("distance_m") or 0 for p in ps), 1),
                              "ball_touches": sum(p["ball_touches"] for p in ps),

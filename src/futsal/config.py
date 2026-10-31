@@ -85,7 +85,8 @@ class JerseyConfig:
     min_share: float = 0.6          # ...and its share of all confident reads on that track
     # shirt numbers each team actually wears (the team sheet); reads of any other number are ignored.
     # Empty: every one- or two-digit read counts (expect stripes and bibs to produce false numbers).
-    roster: dict[str, list[int]] = field(default_factory=dict)
+    # Either a list of numbers or {number: name}; a name belongs to its team and shirt for the whole match.
+    roster: dict[str, list[int] | dict[int, str]] = field(default_factory=dict)
     # numbers PARSeq invents from the kit itself (thin stripes read as 1); only Jev may vote for them
     parseq_ignore: list[int] = field(default_factory=list)
     device: str | None = None
@@ -119,6 +120,13 @@ class Config:
     def kit(self, name: str | None) -> Kit | None:
         return next((k for k in self.kits if k.name == name), None)
 
+    def player_name(self, team: str, number: int) -> str:
+        """The roster name of a shirt, or "Team #n" when the roster gives none."""
+        names = self.jersey.roster.get(team)
+        if isinstance(names, dict) and names.get(int(number)):
+            return str(names[int(number)])
+        return f"{team} #{number}"
+
 
 def _build(cls, data: dict | None):
     data = data or {}
@@ -149,6 +157,12 @@ def load(path: Path) -> Config:
     cfg.output_root = Path(cfg.output_root)
     if cfg.court is not None:
         cfg.court = [tuple(int(v) for v in p) for p in cfg.court]
+    for team, shirts in cfg.jersey.roster.items():
+        if team not in cfg.teams:
+            raise ValueError(f"jersey.roster: team {team!r} is not in teams {cfg.teams}")
+        # `number in roster[team]` works for both forms: a list of numbers or {number: name}
+        cfg.jersey.roster[team] = ({int(n): str(name) for n, name in shirts.items()} if isinstance(shirts, dict)
+                                   else [int(n) for n in shirts])
     if cfg.in_play is not None:
         cfg.in_play = [(float(a), float(b)) for a, b in cfg.in_play]
         if any(a >= b for a, b in cfg.in_play):

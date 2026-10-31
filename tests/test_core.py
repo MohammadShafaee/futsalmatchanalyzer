@@ -108,6 +108,14 @@ def test_jev_second_reader_joins_the_vote_and_images_fit_the_api():
         assert jev.MIN_SIDE <= min(h, w) and max(h, w) <= jev.MAX_SIDE
 
 
+def test_roster_names_stay_with_their_shirt(tmp_path):
+    p = tmp_path / "c.yaml"
+    p.write_text("video: x.mp4\nteams: [A, B]\njersey: {roster: {A: {4: Fusco, '7': Rossi}, B: [1, 2]}}\n")
+    cfg = config.load(p)
+    assert cfg.player_name("A", 4) == "Fusco" and cfg.player_name("A", 7) == "Rossi"
+    assert cfg.player_name("B", 2) == "B #2" and 7 in cfg.jersey.roster["A"] and 3 not in cfg.jersey.roster["B"]
+
+
 def test_full_match_config_pitch_fits():
     cfg = config.load("configs/manzano_full.yaml")
     pitch = Pitch(cfg.pitch.length_m, cfg.pitch.width_m, cfg.pitch.points)
