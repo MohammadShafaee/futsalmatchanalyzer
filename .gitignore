@@ -1,4 +1,6 @@
 .venv/
+# API keys (JEV_API_KEY=...) stay on this machine
+.env
 __pycache__/
 *.py[cod]
 outputs/*

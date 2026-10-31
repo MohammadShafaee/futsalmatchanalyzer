@@ -13,7 +13,7 @@ Everything is aggregated so a full match fits the dashboard's file limits:
 - timeline.json  possession and team positions in short windows
 - zones.json     time the ball spent in each third, per half
 - players.json   tracks seen on court long enough to matter
-- match.json     clip length, half-time, tracking quality, arbiter activity
+- match.json     clip length, half-time, tracking quality
 - court.txt      the empty court (median of frames) as a JPEG data URI
 
 Positions between the goals are expressed from Manzano's point of view (the first team in the config):
@@ -31,7 +31,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from . import arbiter, jersey, video
+from . import jersey, video
 from .config import Config
 from .court import Pitch
 from .metrics import MAX_RUN_SPEED_M_S
@@ -296,18 +296,13 @@ def export(cfg: Config, run_dir: Path, out: Path) -> dict:
                              "reads": sum(shirts[str(t)]["reads"] for t in tids)})
 
     q = summary["quality"]
-    cache = run_dir / arbiter.CACHE
-    answers = json.loads(cache.read_text(encoding="utf-8")) if cache.exists() else {}
     match = [{"duration_min": round(duration / 60, 1), "analysed_frames": q["analyzed_frames"],
               "crop_w": meta["width"], "crop_h": bottom - top,
               "halftime_min": round(halftime / 60, 1) if halftime is not None else None,
               "home_starts_left": home_left,
               "ball_seen_pct": q["ball_detected_percent"], "ball_filled_pct": q["ball_interpolated_percent"],
               "possession_known_pct": q["possession_known_percent"],
-              "count_accuracy_pct": q.get("expected_count_match_percent", {}).get("all"),
-              "ai_questions": len(answers),
-              "ai_not_playing": sum(a.get("label") == arbiter.NOT_PLAYING for a in answers.values()),
-              "ai_swaps": sum(a.get("label") == arbiter.MIXED for a in answers.values())}]
+              "count_accuracy_pct": q.get("expected_count_match_percent", {}).get("all")}]
 
     files = {"heat": heat, "timeline": timeline, "zones": zone_rows, "players": players, "match": match}
     if numbered:

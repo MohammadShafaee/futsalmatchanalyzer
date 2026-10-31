@@ -8,7 +8,7 @@ from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 
-from . import arbiter, ball, kits, metrics, storage, tracks, video
+from . import ball, kits, metrics, storage, tracks, video
 from .config import Config
 from .court import Court
 from .detect import Detector
@@ -79,10 +79,6 @@ def analyze(cfg: Config, run_dir: Path) -> dict:
     for index, frame in video.frames(Path(meta["path"]), wanted=set(by_frame)):
         for d, _ in by_frame[index]:
             d.kit_shares = classifier.shares(frame, (d.x1, d.y1, d.x2, d.y2))
-
-    if cfg.arbiter.enabled:
-        by_track = arbiter.resolve(by_track, classifier, cfg.kits, cfg.arbiter, Path(meta["path"]), run_dir,
-                                   court.polygon, fps, stride)
 
     # ~0.5 s of consistently different shirt colour means ByteTrack switched people
     min_run = max(3, round(0.5 * fps / stride))

@@ -90,19 +90,6 @@ class JerseyConfig:
 
 
 @dataclass
-class ArbiterConfig:
-    """A vision-language model settles tracks the colour rules can't (see arbiter.py)."""
-    enabled: bool = False
-    model: str = "gemini-3.5-flash"
-    max_calls: int = 300            # per run; answers are cached, so re-analysing costs nothing
-    min_track_s: float = 1.0        # shorter tracks aren't worth a question
-    vote_margin: float = 0.4        # ask when the runner-up kit gets within this share of the winner
-    edge_px: float = 15.0           # ask when the median foot position is this close to the court edge
-    min_confidence: float = 0.6     # apply only answers at least this confident
-    min_interval_s: float = 13.0    # seconds between calls: the free tier allows 5 per minute
-
-
-@dataclass
 class Config:
     video: Path
     output_root: Path = Path("outputs")
@@ -116,7 +103,6 @@ class Config:
     in_play: list[tuple[float, float]] | None = None
     detector: DetectorConfig = field(default_factory=DetectorConfig)
     analysis: AnalysisConfig = field(default_factory=AnalysisConfig)
-    arbiter: ArbiterConfig = field(default_factory=ArbiterConfig)
     goals: Goals | None = None
     pitch: PitchConfig | None = None
     jersey: JerseyConfig = field(default_factory=JerseyConfig)
@@ -147,7 +133,6 @@ def load(path: Path) -> Config:
     cfg = _build(Config, {**data, "kits": kits,
                           "detector": _build(DetectorConfig, data.get("detector")),
                           "analysis": _build(AnalysisConfig, data.get("analysis")),
-                          "arbiter": _build(ArbiterConfig, data.get("arbiter")),
                           "goals": _build(Goals, data["goals"]) if data.get("goals") else None,
                           "pitch": _build(PitchConfig, data["pitch"]) if data.get("pitch") else None,
                           "jersey": _build(JerseyConfig, data.get("jersey"))})
