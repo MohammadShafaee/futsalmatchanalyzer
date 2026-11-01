@@ -1,0 +1,371 @@
+<title>Match Labeller</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+  /* Layout: a sticky top bar with the two jobs and progress, one task at a time below, answers in a thumb-sized grid */
+  :root {
+    --bg: #f3f5f6; --panel: #ffffff; --fg: #172026; --muted: #5d6971; --line: #d6dce0;
+    --accent: #1f6f8b; --manzano: #2457c5; --jesolo: #c23440; --ok: #2f7d4f; --bad: #c0392b; --ball: #e08a00;
+    --sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif; --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+    --bg: #111618; --panel: #1a2125; --fg: #e5eaed; --muted: #9aa7af; --line: #2d363c;
+    --accent: #6cb6d0; --manzano: #6d97f2; --jesolo: #f07a83; --ok: #6cc28f; --bad: #f07b6f; --ball: #f2a93b; color-scheme: dark } }
+  :root[data-theme="dark"] {
+    --bg: #111618; --panel: #1a2125; --fg: #e5eaed; --muted: #9aa7af; --line: #2d363c;
+    --accent: #6cb6d0; --manzano: #6d97f2; --jesolo: #f07a83; --ok: #6cc28f; --bad: #f07b6f; --ball: #f2a93b; color-scheme: dark }
+  body { background: var(--bg); color: var(--fg); font: 15px/1.5 var(--sans); }
+  body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--panel); }
+  .bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--panel); border-bottom: 1px solid var(--line); }
+  .bar-in, main { max-width: 1100px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .bar-in { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding-block: 10px; }
+  .bar h1 { font-size: 16px; font-weight: 600; margin: 0; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tab { font: inherit; font-size: 14px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); padding: 6px 12px; border-radius: 6px; cursor: pointer; }
+  .tab[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+  .tab .count { font: 500 12px var(--mono); opacity: .85; margin-left: 6px; }
+  .status { margin-left: auto; font: 500 12px var(--mono); color: var(--muted); }
+  .status.saved { color: var(--ok); } .status.error { color: var(--bad); }
+  main { padding-block: 16px 48px; display: grid; gap: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 12px; min-width: 0; }
+  .q-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+  .q-head h2 { font-size: 18px; margin: 0; font-weight: 600; }
+  .q-head .meta { font: 500 12px var(--mono); color: var(--muted); }
+  .help { color: var(--muted); font-size: 14px; margin: 0; max-width: 70ch; }
+  .viewer { display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr); }
+  canvas.zoom { width: 100%; max-width: 560px; aspect-ratio: 4 / 3; height: auto; justify-self: center; border-radius: 8px; background: var(--bg); }
+  canvas.where { width: 100%; height: auto; border-radius: 6px; opacity: .9; }
+  .strip { display: flex; gap: 6px; overflow-x: auto; padding: 2px; }
+  .strip button { flex: 0 0 auto; border: 2px solid var(--line); border-radius: 6px; padding: 0; background: var(--bg); cursor: pointer; display: grid; gap: 2px; justify-items: center; }
+  .strip button img { display: block; width: 72px; height: 54px; object-fit: cover; border-radius: 4px 4px 0 0; }
+  .strip button span { font: 500 10px var(--mono); color: var(--muted); padding: 0 4px 3px; }
+  .strip button[aria-pressed="true"] { border-color: var(--accent); }
+  .strip button[aria-pressed="true"] span { color: var(--accent); }
+  .strip .loading { font-size: 12px; color: var(--muted); padding: 8px; }
+  .answers { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); }
+  .team h3 { font-size: 13px; font-weight: 600; margin: 0 0 6px; display: flex; align-items: center; gap: 8px; }
+  .team h3 i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .grid { display: grid; gap: 6px; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); }
+  .pick { font: inherit; font-size: 14px; text-align: left; padding: 9px 10px; border-radius: 7px; cursor: pointer; border: 1px solid var(--line);
+          background: var(--bg); color: var(--fg); min-height: 44px; display: flex; gap: 8px; align-items: center; }
+  .pick b { font: 500 13px var(--mono); min-width: 26px; }
+  .pick.m b { color: var(--manzano); } .pick.j b { color: var(--jesolo); }
+  .pick:hover { border-color: var(--accent); }
+  .pick[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--accent); }
+  .pick:focus-visible, .tab:focus-visible, .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .others { display: grid; gap: 6px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  .nav { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .btn { font: inherit; font-size: 14px; padding: 8px 14px; border-radius: 7px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); cursor: pointer; min-height: 40px; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--panel); font-weight: 600; }
+  .btn[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--accent); }
+  .nav .spacer { flex: 1; }
+  .frame-wrap { overflow-x: auto; border-radius: 8px; background: var(--bg); }
+  .frame { position: relative; min-width: 900px; line-height: 0; }
+  .frame img { width: 100%; display: block; }
+  .frame svg { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--muted); }
+  .legend span { display: inline-flex; gap: 6px; align-items: center; }
+  .legend i { width: 14px; height: 10px; border: 2px solid; display: inline-block; border-radius: 2px; }
+  .empty { text-align: center; padding: 32px 16px; color: var(--muted); display: grid; gap: 8px; justify-items: center; }
+  .empty h2 { color: var(--fg); font-size: 18px; margin: 0; }
+  .progress { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+  .progress i { display: block; height: 100%; background: var(--ok); width: 0; transition: width .2s; }
+  @media (prefers-reduced-motion: reduce) { .progress i { transition: none; } }
+</style>
+
+<header class="bar">
+  <div class="bar-in">
+    <h1>Match Labeller</h1>
+    <div class="tabs" role="group" aria-label="Job">
+      <button type="button" class="tab" id="tab-who" aria-pressed="true">Who is this?<span class="count" id="count-who">…</span></button>
+      <button type="button" class="tab" id="tab-frame" aria-pressed="false">Check frames<span class="count" id="count-frame">…</span></button>
+    </div>
+    <span class="status" id="status" role="status">Loading…</span>
+  </div>
+</header>
+
+<main>
+  <div class="progress" aria-hidden="true"><i id="progress"></i></div>
+
+  <section class="card" id="view-who">
+    <div class="q-head"><h2>Who is this player?</h2><span class="meta" id="who-meta"></span></div>
+    <p class="help">The player inside the yellow box. Tap his name. If you can't see his number, guess from the team or tap "Can't tell": a wrong guess is worse than "Can't tell". The strip below has the frames just before and after — tap one to see if he turns toward the camera or the blur clears.</p>
+    <div class="viewer">
+      <canvas class="zoom" id="who-zoom" width="640" height="480" aria-label="Close-up of the player to identify"></canvas>
+      <div class="strip" id="who-strip"></div>
+      <canvas class="where" id="who-where" width="960" height="190" aria-label="Where he is on the court"></canvas>
+    </div>
+    <div class="answers" id="who-answers"></div>
+    <div class="others" id="who-others"></div>
+    <div class="nav">
+      <button type="button" class="btn" id="who-prev">← Previous</button>
+      <button type="button" class="btn" id="who-skip">Skip</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn" id="who-next-open">Next unanswered →</button>
+    </div>
+  </section>
+
+  <section class="card" id="view-frame" hidden>
+    <div class="q-head"><h2>Check this frame</h2><span class="meta" id="frame-meta"></span></div>
+    <p class="help">The boxes are what the system found. 1. Tap any box that is wrong (not a person, or two people in one box). 2. Switch to "Add missed player" and tap the feet of anyone without a box. 3. Switch to "Place ball" and tap the ball, or press "No ball visible". Then "Save &amp; next".</p>
+    <div class="nav" role="group" aria-label="What a tap does">
+      <button type="button" class="btn" data-mode="wrong" aria-pressed="true">Mark wrong box</button>
+      <button type="button" class="btn" data-mode="missed" aria-pressed="false">Add missed player</button>
+      <button type="button" class="btn" data-mode="ball" aria-pressed="false">Place ball</button>
+      <button type="button" class="btn" id="no-ball" aria-pressed="false">No ball visible</button>
+      <button type="button" class="btn" id="undo">Undo</button>
+    </div>
+    <div class="legend">
+      <span><i style="border-color: var(--ok)"></i>System's box</span><span><i style="border-color: var(--bad)"></i>Marked wrong</span>
+      <span><i style="border-color: var(--accent); border-radius: 50%"></i>Missed player you added</span><span><i style="border-color: var(--ball); border-radius: 50%"></i>Ball</span>
+    </div>
+    <div class="frame-wrap"><div class="frame" id="frame"><img id="frame-img" alt="Frame of the match"><svg id="frame-svg" role="img" aria-label="Boxes and marks on the frame"></svg></div></div>
+    <div class="nav">
+      <button type="button" class="btn" id="frame-prev">← Previous</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn primary" id="frame-save">Save &amp; next →</button>
+    </div>
+  </section>
+
+  <section class="card empty" id="view-wait">
+    <h2 id="wait-title">Loading the questions…</h2>
+    <p class="help" id="wait-text">This takes a few seconds.</p>
+  </section>
+</main>
+
+<script>
+(async () => {
+  const $ = (id) => document.getElementById(id);
+  const status = (text, cls = '') => { const s = $('status'); s.textContent = text; s.className = 'status ' + cls; };
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const wait = (title, text) => { $('view-wait').hidden = false; $('view-who').hidden = true; $('view-frame').hidden = true; $('wait-title').textContent = title; $('wait-text').textContent = text; };
+
+  let timer = setTimeout(() => wait("Can't reach the saved questions yet", 'Check your connection; the page keeps trying.'), 10000);
+  const db = await claude.use('db');
+  if (!db) { clearTimeout(timer); wait('Open this page while signed in to Claude', 'Answers are saved to your account, so the labeller needs you signed in.'); status('Offline', 'error'); return; }
+
+  let tasks;
+  try {
+    const [fr, idq, ro, im] = await Promise.all(['frames', 'identity', 'roster', 'images'].map((d) => db.doc('tasks/' + d).get()));
+    if (!fr.exists || !idq.exists || !ro.exists || !im.exists) throw new Error('missing');
+    tasks = {frames: fr.data().frames, who: idq.data().questions, roster: ro.data().roster, meta: ro.data().meta, images: im.data().images};
+  } catch (e) {
+    clearTimeout(timer); wait('No questions yet', 'Claude adds the frames and questions after publishing; reload in a minute.'); status('Waiting', ''); return;
+  }
+  clearTimeout(timer);
+  const checks = tasks.frames.filter((f) => f.check);
+  const frameById = Object.fromEntries(tasks.frames.map((f) => [f.frame, f]));
+  const [teamA, teamB] = tasks.meta.teams;
+  const answers = new Map();
+  const imgCache = new Map();
+  const loadImg = (name) => {
+    if (!imgCache.has(name)) imgCache.set(name, new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = tasks.images[name]; }));
+    return imgCache.get(name);
+  };
+  const clock = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+
+  let view = 'who', whoIdx = 0, frIdx = 0;
+  const firstOpen = (list) => { const i = list.findIndex((q) => !answers.has(q.id)); return i < 0 ? 0 : i; };
+  const counts = () => {
+    const w = tasks.who.filter((q) => answers.has(q.id)).length, f = checks.filter((q) => answers.has(q.id)).length;
+    $('count-who').textContent = `${w}/${tasks.who.length}`; $('count-frame').textContent = `${f}/${checks.length}`;
+    $('progress').style.width = `${100 * (w + f) / (tasks.who.length + checks.length)}%`;
+  };
+  async function save(id, body) {
+    status('Saving…');
+    try { await db.collection('answers').doc(id).set({...body, at: new Date().toISOString()}); status('Saved', 'saved'); }
+    catch (e) { status(e && e.code === 'invalid_argument' ? 'You can only view this page' : 'Not saved, try again', 'error'); throw e; }
+  }
+
+  // ---- who is this ----
+  const choices = [
+    ...tasks.roster[teamA].map((p) => ({key: `${teamA}|${p.number}`, team: teamA, number: p.number, label: p.name, cls: 'm'})),
+    ...tasks.roster[teamB].map((p) => ({key: `${teamB}|${p.number}`, team: teamB, number: p.number, label: p.name, cls: 'j'})),
+  ];
+  const others = [
+    {key: `${teamA}|?`, label: `${teamA}, can't see who`}, {key: `${teamB}|?`, label: `${teamB}, can't see who`},
+    {key: 'referee', label: 'Referee'}, {key: 'not_playing', label: 'Not playing (bench, staff, crowd)'},
+    {key: 'bad_box', label: 'Two people, or not a person'}, {key: 'unsure', label: "Can't tell"},
+  ];
+  function teamBlock(team, color) {
+    const div = document.createElement('div'); div.className = 'team';
+    const h = document.createElement('h3'); const i = document.createElement('i'); i.style.background = color;
+    h.append(i, team); div.append(h);
+    const g = document.createElement('div'); g.className = 'grid';
+    for (const c of choices.filter((c) => c.team === team)) {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'pick ' + c.cls; b.dataset.key = c.key;
+      const n = document.createElement('b'); n.textContent = '#' + c.number; b.append(n, c.label); g.append(b);
+    }
+    div.append(g); return div;
+  }
+  $('who-answers').append(teamBlock(teamA, 'var(--manzano)'), teamBlock(teamB, 'var(--jesolo)'));
+  for (const o of others) {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'pick'; b.dataset.key = o.key; b.textContent = o.label;
+    $('who-others').append(b);
+  }
+  document.querySelectorAll('#view-who .pick').forEach((b) => b.addEventListener('click', async () => {
+    const q = tasks.who[whoIdx], key = b.dataset.key;
+    const [team, num] = key.includes('|') ? key.split('|') : [null, null];
+    try {
+      await save(q.id, {kind: 'identity', task: q.id, track: q.track, frame: q.frame, choice: key, team, number: num && num !== '?' ? +num : null});
+      whoIdx = Math.min(tasks.who.length - 1, whoIdx + 1);
+      if (answers.has(tasks.who[whoIdx].id)) whoIdx = firstOpen(tasks.who);
+      renderWho();
+    } catch (e) { /* status already says why */ }
+  }));
+  $('who-prev').addEventListener('click', () => { whoIdx = Math.max(0, whoIdx - 1); renderWho(); });
+  $('who-skip').addEventListener('click', () => { whoIdx = (whoIdx + 1) % tasks.who.length; renderWho(); });
+  $('who-next-open').addEventListener('click', () => { whoIdx = firstOpen(tasks.who); renderWho(); });
+
+  // zoomMode: {kind:'now'} shows q's own frame+box, cropped live; {kind:'ctx', img} shows an already-cropped context image
+  let zoomMode = {kind: 'now'}, mainImg = null;
+  const contextCache = new Map();
+  function loadContext(q) {
+    if (!contextCache.has(q.id)) contextCache.set(q.id, db.collection('context').doc(q.id).get().then((d) => d.exists ? d.data() : {before: [], after: []}).catch(() => null));
+    return contextCache.get(q.id);
+  }
+  function drawZoom() {
+    const q = tasks.who[whoIdx], cz = $('who-zoom'), ctx = cz.getContext('2d');
+    ctx.fillStyle = css('--bg'); ctx.fillRect(0, 0, cz.width, cz.height);
+    ctx.imageSmoothingQuality = 'high';
+    if (zoomMode.kind === 'ctx') {
+      if (!zoomMode.img.complete) { zoomMode.img.onload = drawZoom; return; }
+      ctx.drawImage(zoomMode.img, 0, 0, cz.width, cz.height);
+      return;
+    }
+    if (!mainImg) return;
+    const b = q.box, bw = b.x2 - b.x1, bh = b.y2 - b.y1;
+    const regionH = Math.max(bh * 2.2, 120), regionW = regionH * cz.width / cz.height;
+    const cx = (b.x1 + b.x2) / 2, cy = (b.y1 + b.y2) / 2;
+    const sx = Math.min(Math.max(0, cx - regionW / 2), mainImg.width - regionW), sy = Math.min(Math.max(0, cy - regionH / 2), Math.max(0, mainImg.height - regionH));
+    ctx.drawImage(mainImg, sx, sy, regionW, regionH, 0, 0, cz.width, cz.height);
+    const k = cz.width / regionW;
+    ctx.strokeStyle = '#ffd400'; ctx.lineWidth = 3;
+    ctx.strokeRect((b.x1 - sx) * k - 4, (b.y1 - sy) * k - 4, bw * k + 8, bh * k + 8);
+  }
+  function stripBtn(strip, label, src, zoomMode_) {
+    const b = document.createElement('button'); b.type = 'button'; b.setAttribute('aria-pressed', 'false');
+    const img = document.createElement('img'); img.src = src; img.alt = label;
+    const s = document.createElement('span'); s.textContent = label;
+    b.append(img, s);
+    b.addEventListener('click', () => {
+      zoomMode = zoomMode_(img); drawZoom();
+      strip.querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    });
+    return b;
+  }
+  async function renderStrip(q) {
+    const strip = $('who-strip');
+    strip.replaceChildren();
+    const nowBtn = stripBtn(strip, 'now', tasks.images[q.image], () => ({kind: 'now'}));
+    nowBtn.setAttribute('aria-pressed', 'true');
+    strip.append(nowBtn);
+    const loading = document.createElement('span'); loading.className = 'loading'; loading.textContent = 'Loading nearby frames…'; strip.append(loading);
+    const ctxData = await loadContext(q);
+    if (tasks.who[whoIdx] !== q) return;   // navigated away while loading
+    loading.remove();
+    if (!ctxData) return;
+    for (const entry of ctxData.before) {   // oldest to newest, each inserted right before 'now' keeps that order
+      strip.insertBefore(stripBtn(strip, (entry.t - q.t).toFixed(1) + 's', entry.image, (img) => ({kind: 'ctx', img})), nowBtn);
+    }
+    for (const entry of ctxData.after) {
+      strip.append(stripBtn(strip, '+' + (entry.t - q.t).toFixed(1) + 's', entry.image, (img) => ({kind: 'ctx', img})));
+    }
+  }
+
+  async function renderWho() {
+    const q = tasks.who[whoIdx];
+    const done = answers.get(q.id);
+    $('who-meta').textContent = `Question ${whoIdx + 1} of ${tasks.who.length} · match time ${clock(q.t)}` + (done ? ' · answered' : '');
+    document.querySelectorAll('#view-who .pick').forEach((b) => b.setAttribute('aria-pressed', String(!!done && done.choice === b.dataset.key)));
+    zoomMode = {kind: 'now'}; mainImg = null;
+    try { mainImg = await loadImg(q.image); } catch (e) { status("Picture didn't load", 'error'); return; }
+    if (tasks.who[whoIdx] !== q) return;
+    drawZoom();
+    const cw = $('who-where'), wx = cw.getContext('2d');
+    wx.drawImage(mainImg, 0, 0, cw.width, cw.height);
+    const b = q.box, s = cw.width / mainImg.width;
+    wx.strokeStyle = '#ffd400'; wx.lineWidth = 3; wx.strokeRect(b.x1 * s - 3, b.y1 * s - 3, (b.x2 - b.x1) * s + 6, (b.y2 - b.y1) * s + 6);
+    renderStrip(q);
+  }
+
+  // ---- frame checks ----
+  let mode = 'wrong', draft = null;
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  const fresh = (f) => { const a = answers.get(f.id); return a ? {wrong: [...(a.wrong || [])], missed: (a.missed || []).map((p) => [...p]), ball: a.ball ? [...a.ball] : null, noBall: !!a.noBall, history: []}
+                                                         : {wrong: [], missed: [], ball: null, noBall: false, history: []}; };
+  document.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => {
+    mode = b.dataset.mode; document.querySelectorAll('[data-mode]').forEach((o) => o.setAttribute('aria-pressed', String(o === b)));
+  }));
+  $('no-ball').addEventListener('click', () => { draft.history.push(JSON.stringify(draft)); draft.noBall = !draft.noBall; if (draft.noBall) draft.ball = null; drawFrame(); });
+  $('undo').addEventListener('click', () => { const h = draft.history.pop(); if (h) { const prev = JSON.parse(h); prev.history = draft.history; draft = prev; drawFrame(); } });
+  $('frame-svg').addEventListener('click', (ev) => {
+    const f = checks[frIdx], svg = $('frame-svg'), r = svg.getBoundingClientRect();
+    const x = (ev.clientX - r.left) * tasks.meta.width / r.width, y = (ev.clientY - r.top) * (tasks.meta.crop_rows[1] - tasks.meta.crop_rows[0]) / r.height;
+    draft.history.push(JSON.stringify({...draft, history: []}));
+    if (mode === 'wrong') {
+      const hit = f.boxes.filter((b) => x >= b.x1 - 4 && x <= b.x2 + 4 && y >= b.y1 - 4 && y <= b.y2 + 4).sort((a, b) => (a.x2 - a.x1) * (a.y2 - a.y1) - (b.x2 - b.x1) * (b.y2 - b.y1))[0];
+      if (!hit) { draft.history.pop(); return; }
+      draft.wrong = draft.wrong.includes(hit.id) ? draft.wrong.filter((i) => i !== hit.id) : [...draft.wrong, hit.id];
+    } else if (mode === 'missed') {
+      draft.missed.push([Math.round(x), Math.round(y)]);
+    } else {
+      draft.ball = [Math.round(x), Math.round(y)]; draft.noBall = false;
+    }
+    drawFrame();
+  });
+  $('frame-prev').addEventListener('click', () => { frIdx = Math.max(0, frIdx - 1); openFrame(); });
+  $('frame-save').addEventListener('click', async () => {
+    const f = checks[frIdx];
+    try {
+      await save(f.id, {kind: 'frame', task: f.id, frame: f.frame, wrong: draft.wrong, missed: draft.missed, ball: draft.ball, noBall: draft.noBall,
+                        boxes: f.boxes.length});
+      frIdx = Math.min(checks.length - 1, frIdx + 1);
+      if (answers.has(checks[frIdx].id)) frIdx = firstOpen(checks);
+      openFrame();
+    } catch (e) { /* status says why */ }
+  });
+  function openFrame() {
+    const f = checks[frIdx];
+    draft = fresh(f);
+    $('frame-meta').textContent = `Frame ${frIdx + 1} of ${checks.length} · match time ${clock(f.t)}` + (answers.has(f.id) ? ' · answered' : '');
+    $('frame-img').src = tasks.images[f.image];
+    $('frame-svg').setAttribute('viewBox', `0 0 ${tasks.meta.width} ${tasks.meta.crop_rows[1] - tasks.meta.crop_rows[0]}`);
+    $('frame-svg').setAttribute('preserveAspectRatio', 'none');
+    drawFrame();
+  }
+  function drawFrame() {
+    const f = checks[frIdx], svg = $('frame-svg');
+    svg.replaceChildren();
+    const el = (tag, attrs) => { const e = document.createElementNS(SVGNS, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); svg.append(e); return e; };
+    for (const b of f.boxes) {
+      const wrong = draft.wrong.includes(b.id);
+      el('rect', {x: b.x1, y: b.y1, width: b.x2 - b.x1, height: b.y2 - b.y1, fill: wrong ? 'rgba(192,57,43,.18)' : 'transparent',
+                  stroke: wrong ? css('--bad') : css('--ok'), 'stroke-width': wrong ? 4 : 2.5});
+      if (wrong) { el('line', {x1: b.x1, y1: b.y1, x2: b.x2, y2: b.y2, stroke: css('--bad'), 'stroke-width': 3}); el('line', {x1: b.x2, y1: b.y1, x2: b.x1, y2: b.y2, stroke: css('--bad'), 'stroke-width': 3}); }
+    }
+    for (const [x, y] of draft.missed) el('circle', {cx: x, cy: y, r: 12, fill: 'transparent', stroke: css('--accent'), 'stroke-width': 4});
+    if (draft.ball) el('circle', {cx: draft.ball[0], cy: draft.ball[1], r: 9, fill: 'transparent', stroke: css('--ball'), 'stroke-width': 4});
+    $('no-ball').setAttribute('aria-pressed', String(draft.noBall));
+  }
+
+  // ---- tabs and live progress ----
+  function show(v) {
+    view = v; $('view-wait').hidden = true;
+    $('view-who').hidden = v !== 'who'; $('view-frame').hidden = v !== 'frame';
+    $('tab-who').setAttribute('aria-pressed', String(v === 'who')); $('tab-frame').setAttribute('aria-pressed', String(v === 'frame'));
+    if (v === 'who') renderWho(); else openFrame();
+  }
+  $('tab-who').addEventListener('click', () => show('who'));
+  $('tab-frame').addEventListener('click', () => show('frame'));
+
+  let first = true;
+  db.collection('answers').onSnapshot((snap) => {
+    answers.clear();
+    for (const d of snap.docs) answers.set(d.id, d.data());
+    counts();
+    if (first) { first = false; whoIdx = firstOpen(tasks.who); frIdx = firstOpen(checks); show('who'); status('Ready'); }
+    else if (view === 'who') $('who-meta').textContent = $('who-meta').textContent;
+  }, () => status('Answers not loading', 'error'));
+})();
+</script>
