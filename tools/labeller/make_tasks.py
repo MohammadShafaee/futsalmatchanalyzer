@@ -48,7 +48,15 @@ for i, f in enumerate(sampled):
                    "boxes": bx})
 
 by_frame = {fr["frame"]: fr for fr in frames}
+# skip tracks `futsal jerseys` already read with enough confidence to call (see jersey.vote()): asking a
+# human to redo those would give no ground truth we don't already have a model answer for.
+jerseys_path = run / "jerseys.json"
+already_read = set(json.loads(jerseys_path.read_text(encoding="utf-8"))) if jerseys_path.exists() else set()
+skipped = 0
 for tid, (h, f, j) in sorted(best.items(), key=lambda kv: (kv[1][1], kv[1][2])):
+    if str(tid) in already_read:
+        skipped += 1
+        continue
     b = by_frame[f]["boxes"][j]
     identity.append({"id": f"id{tid}", "track": int(tid), "frame": f, "t": by_frame[f]["t"], "image": by_frame[f]["image"],
                      "box": {k: b[k] for k in ("x1", "y1", "x2", "y2")}, "kit": b["kit"]})
@@ -60,5 +68,6 @@ meta = {"window": [t0, t1], "every_s": EVERY / fps, "crop_rows": [top, bottom], 
 (out / "frames.json").write_text(json.dumps({"frames": frames}, separators=(",", ":")), encoding="utf-8")
 (out / "identity.json").write_text(json.dumps({"questions": identity}, separators=(",", ":")), encoding="utf-8")
 (out / "roster.json").write_text(json.dumps({"roster": roster, "meta": meta}, separators=(",", ":")), encoding="utf-8")
-print(len(frames), "frames,", sum(fr["check"] for fr in frames), "frame checks,", len(identity), "who-is-this questions")
+print(len(frames), "frames,", sum(fr["check"] for fr in frames), "frame checks,", len(identity), "who-is-this questions",
+      f"({skipped} skipped, already read by jerseys.json)" if skipped else "")
 print("frames.json", (out / "frames.json").stat().st_size, "identity.json", (out / "identity.json").stat().st_size)
